@@ -30,7 +30,8 @@ import {
   AlertTriangle,
   LogOut,
   Lock,
-  Loader2
+  Loader2,
+  Menu
 } from 'lucide-react';
 
 // Storage keys for migration fallback
@@ -51,6 +52,7 @@ function App() {
 
   // --- Navigation & Loading ---
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'directory' | 'calendar' | 'settings'
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   // --- Core Database State ---
@@ -823,8 +825,11 @@ function App() {
   return (
     <div className="app-container">
       
+      {/* Sidebar Backdrop Overlay */}
+      <div className={`sidebar-backdrop ${isSidebarOpen ? 'show' : ''}`} onClick={() => setIsSidebarOpen(false)} />
+      
       {/* --- Sidebar Navigation & Branding --- */}
-      <aside className="glass-panel sidebar" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '240px' }}>
+      <aside className={`glass-panel sidebar ${isSidebarOpen ? 'open' : ''}`} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '240px' }}>
         <div className="branding" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ background: 'linear-gradient(135deg, var(--accent-cyan), var(--accent-blue))', padding: '10px', borderRadius: '12px', boxShadow: 'var(--shadow-glow-cyan)' }}>
             <Sun className="pulse-icon" style={{ color: 'white', width: '24px', height: '24px' }} />
@@ -837,21 +842,21 @@ function App() {
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, marginTop: '20px' }}>
           <button 
-            onClick={() => setActiveTab('dashboard')} 
+            onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }} 
             className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
           >
             <Activity size={18} /> Dashboard
           </button>
           
           <button 
-            onClick={() => setActiveTab('directory')} 
+            onClick={() => { setActiveTab('directory'); setIsSidebarOpen(false); }} 
             className={`nav-btn ${activeTab === 'directory' ? 'active' : ''}`}
           >
             <Users size={18} /> Directory ({filteredVendors.length})
           </button>
           
           <button 
-            onClick={() => setActiveTab('calendar')} 
+            onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); }} 
             className={`nav-btn ${activeTab === 'calendar' ? 'active' : ''}`}
           >
             <Calendar size={18} /> Calendar View
@@ -863,7 +868,7 @@ function App() {
           </button>
           
           <button 
-            onClick={() => setActiveTab('settings')} 
+            onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }} 
             className={`nav-btn ${activeTab === 'settings' ? 'active' : ''}`}
           >
             <FileText size={18} /> Database Admin
@@ -892,11 +897,26 @@ function App() {
       </aside>
 
       {/* --- Main Dashboard Area --- */}
-      <main style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', paddingRight: '4px' }}>
+      <main className="app-main" style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', paddingRight: '4px' }}>
         
         {/* --- Header Section --- */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Mobile Sidebar Hamburger Toggle */}
+            <button 
+              className="mobile-menu-toggle"
+              onClick={() => setIsSidebarOpen(true)}
+              style={{
+                padding: '10px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid var(--border-glass)',
+                borderRadius: '10px',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <Menu size={20} />
+            </button>
+            
             <div>
               <span style={{ textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em', color: 'var(--accent-cyan)', fontWeight: '600' }}>Ahmedabad Division</span>
               <h1 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -913,7 +933,7 @@ function App() {
             {/* Display today's date */}
             <div className="glass-panel" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
               <Clock size={16} style={{ color: 'var(--accent-cyan)' }} />
-              <span>Today: {new Date().toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              <span className="header-date">Today: {new Date().toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
             </div>
           </div>
         </header>
@@ -949,7 +969,7 @@ function App() {
             </section>
 
             {/* Main Dashboard Layout */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '20px' }}>
+            <div className="dashboard-grid">
               
               {/* Left Column: Today's Follow-up list */}
               <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '400px' }}>
@@ -1060,7 +1080,7 @@ function App() {
             
             {/* Filters & Search Card */}
             <section className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '12px' }}>
+              <div className="filter-grid">
                 <div style={{ position: 'relative' }}>
                   <Search size={16} style={{ position: 'absolute', left: '14px', top: '14px', color: 'var(--text-muted)' }} />
                   <input 
@@ -1236,7 +1256,7 @@ function App() {
 
         {/* --- PANEL: CALENDAR VIEW --- */}
         {activeTab === 'calendar' && (
-          <div className="animate-fade-in" style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '20px' }}>
+          <div className="animate-fade-in calendar-grid">
             
             {/* Calendar Sheet */}
             <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -1378,7 +1398,7 @@ function App() {
 
         {/* --- PANEL: DATABASE ADMIN / SETTINGS --- */}
         {activeTab === 'settings' && (
-          <div className="animate-fade-in" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div className="animate-fade-in admin-grid">
             
             {/* Database Admin Card */}
             <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -1516,7 +1536,7 @@ function App() {
             </div>
 
             {/* Two Column details */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', background: 'rgba(255, 255, 255, 0.01)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-glass)', fontSize: '0.85rem' }}>
+            <div className="modal-details-grid" style={{ background: 'rgba(255, 255, 255, 0.01)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-glass)', fontSize: '0.85rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Contact Person</span>
@@ -1561,7 +1581,7 @@ function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(6, 182, 212, 0.03)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(6, 182, 212, 0.12)' }}>
               <h3 style={{ fontSize: '1.05rem', color: 'var(--accent-cyan)' }}>Log Call Update</h3>
               
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="modal-form-grid">
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Call Outcome</label>
                   <select 

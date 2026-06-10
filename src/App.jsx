@@ -725,22 +725,6 @@ function App() {
     reader.readAsText(file);
   };
 
-  // Reset database to default
-  const handleResetDatabase = async () => {
-    if (window.confirm('Wipe all cloud database vendors and restore the default 1,799 Ahmedebad Solar database? This will delete all your logs too.')) {
-      setIsLoading(true);
-      try {
-        const { error } = await supabase.from('vendors').delete().eq('user_id', user.id);
-        if (error) throw error;
-        await seedDefaultVendors();
-      } catch (err) {
-        console.error('Reset failed:', err);
-        alert('Failed to reset database.');
-      } finally {
-        setIsLoading(false);
-      }
-    }
-  };
 
   // Month navigation helpers
   const handlePrevMonth = () => {
@@ -1446,15 +1430,7 @@ function App() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: '15px', borderTop: '1px solid var(--border-glass)', paddingTop: '15px' }}>
-                  <button 
-                    onClick={handleResetDatabase} 
-                    className="btn-secondary"
-                    style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
-                  >
-                    <Trash2 size={16} /> Wipe Cloud Data & Reset Default List
-                  </button>
-                </div>
+
               </div>
             </div>
 

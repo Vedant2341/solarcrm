@@ -544,3 +544,34 @@ select.input-field {
   }
 }
 
+/* WhatsApp buttons and helper links styling */
+.whatsapp-btn:hover {
+  background: rgba(37, 211, 102, 0.15) !important;
+  border-color: rgba(37, 211, 102, 0.4) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.1);
+}
+
+.whatsapp-btn:active {
+  transform: translateY(0);
+}
+
+.whatsapp-icon-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #25D366;
+  opacity: 0.85;
+  transition: all 0.2s ease;
+  margin-left: 6px;
+  vertical-align: middle;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.whatsapp-icon-inline:hover {
+  opacity: 1;
+  background: rgba(37, 211, 102, 0.12);
+  transform: scale(1.15);
+}
+

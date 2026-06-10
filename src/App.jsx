@@ -40,6 +40,27 @@ const STATUS_STORAGE_KEY = 'solar_crm_status';
 // Guard to prevent double seeding in React StrictMode
 let isSeedingActive = false;
 
+// Clean & format mobile number to launch WhatsApp chat (defaulting to +91 country code for 10 digits)
+const getWhatsAppUrl = (mobile) => {
+  if (!mobile) return '';
+  const cleaned = String(mobile).replace(/\D/g, '');
+  if (!cleaned) return '';
+  const formatted = cleaned.length === 10 ? `91${cleaned}` : cleaned;
+  return `https://wa.me/${formatted}`;
+};
+
+// Custom WhatsApp SVG Icon Component
+const WhatsAppIcon = ({ size = 16, style = {} }) => (
+  <svg 
+    viewBox="0 0 24 24" 
+    width={size} 
+    height={size} 
+    style={{ fill: 'currentColor', ...style }}
+  >
+    <path d="M12.012 2c-5.506 0-9.989 4.478-9.99 9.984a9.96 9.96 0 0 0 1.37 5.054L2 22l5.132-1.347a9.936 9.936 0 0 0 4.877 1.28h.005c5.505 0 9.989-4.478 9.99-9.985A9.972 9.972 0 0 0 12.012 2zm5.703 14.24c-.244.689-1.215 1.254-1.673 1.303-.45.05-1.037.073-1.688-.135-.651-.208-1.503-.532-2.529-.982-4.242-1.859-6.953-6.2-7.165-6.483-.21-.282-1.688-2.247-1.688-4.288 0-2.04 1.057-3.046 1.433-3.456.377-.41.82-.513 1.096-.513.277 0 .553.003.792.012.247.01.579-.093.905.696.326.789 1.114 2.723 1.21 2.923.097.2.163.433.03.699-.133.266-.2.433-.396.666-.195.233-.41.52-.587.697-.197.198-.403.414-.174.808.23.393 1.018 1.677 2.181 2.714 1.498 1.336 2.759 1.748 3.151 1.942.392.195.621.163.851-.103.23-.266.989-1.149 1.25-1.548.261-.399.522-.333.882-.2.36.133 2.285 1.077 2.383 1.144.098.066.163.099.244.233.081.133.081.77-.163 1.459z" />
+  </svg>
+);
+
 function App() {
   // --- Auth State ---
   const [user, setUser] = useState(null);
@@ -1064,8 +1085,19 @@ function App() {
                       <div key={vendor.id} className="follow-up-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           <span style={{ fontWeight: '700', fontSize: '1rem' }}>{vendor.vendor_name}</span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
                             📞 {vendor.contact_person} ({vendor.mobile})
+                            {vendor.mobile && (
+                              <a 
+                                href={getWhatsAppUrl(vendor.mobile)} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                title="Send WhatsApp Message"
+                                className="whatsapp-icon-inline"
+                              >
+                                <WhatsAppIcon size={12} />
+                              </a>
+                            )}
                           </span>
                           {vendor.logs.length > 0 && (
                             <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontStyle: 'italic', background: 'rgba(6, 182, 212, 0.05)', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-cyan)', marginTop: '6px' }}>
@@ -1262,7 +1294,20 @@ function App() {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Phone size={12} style={{ color: 'var(--text-muted)' }} />
-                          <span>Phone: <strong>{vendor.mobile || 'Not Listed'}</strong></span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                            Phone: <strong style={{ marginLeft: '4px' }}>{vendor.mobile || 'Not Listed'}</strong>
+                            {vendor.mobile && (
+                              <a 
+                                href={getWhatsAppUrl(vendor.mobile)} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                title="Send WhatsApp Message"
+                                className="whatsapp-icon-inline"
+                              >
+                                <WhatsAppIcon size={12} />
+                              </a>
+                            )}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
                           <MapPin size={12} style={{ color: 'var(--text-muted)', marginTop: '2px' }} />
@@ -1441,8 +1486,19 @@ function App() {
                         <span className={`badge badge-${vendor.status.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>{vendor.status}</span>
                       </div>
                       
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center' }}>
                         📞 {vendor.contact_person} ({vendor.mobile})
+                        {vendor.mobile && (
+                          <a 
+                            href={getWhatsAppUrl(vendor.mobile)} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            title="Send WhatsApp Message"
+                            className="whatsapp-icon-inline"
+                          >
+                            <WhatsAppIcon size={12} />
+                          </a>
+                        )}
                       </p>
 
                       {vendor.logs.length > 0 && (
@@ -1607,9 +1663,54 @@ function App() {
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Mobile Number</span>
-                  <p style={{ fontWeight: '600', color: 'var(--accent-cyan)' }}>
-                    <a href={`tel:${selectedVendor.mobile}`} style={{ color: 'inherit', textDecoration: 'none' }}>📞 {selectedVendor.mobile || 'Not Listed'}</a>
-                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                    <a 
+                      href={selectedVendor.mobile ? `tel:${selectedVendor.mobile}` : '#'} 
+                      onClick={(e) => !selectedVendor.mobile && e.preventDefault()}
+                      style={{ 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '6px', 
+                        color: 'inherit', 
+                        textDecoration: 'none', 
+                        background: 'rgba(255, 255, 255, 0.04)', 
+                        padding: '5px 10px', 
+                        borderRadius: '6px', 
+                        border: '1px solid var(--border-glass)',
+                        fontWeight: '600',
+                        fontSize: '0.8rem'
+                      }}
+                    >
+                      <Phone size={12} style={{ color: 'var(--accent-cyan)' }} />
+                      <span>{selectedVendor.mobile || 'Not Listed'}</span>
+                    </a>
+                    {selectedVendor.mobile && (
+                      <a 
+                        href={getWhatsAppUrl(selectedVendor.mobile)} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        title="Send WhatsApp Message"
+                        style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '6px', 
+                          color: '#25D366', 
+                          textDecoration: 'none', 
+                          background: 'rgba(37, 211, 102, 0.08)', 
+                          padding: '5px 10px', 
+                          borderRadius: '6px', 
+                          border: '1px solid rgba(37, 211, 102, 0.2)',
+                          fontWeight: '600',
+                          fontSize: '0.8rem',
+                          transition: 'all 0.2s ease'
+                        }}
+                        className="whatsapp-btn"
+                      >
+                        <WhatsAppIcon size={12} />
+                        <span>WhatsApp</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Email Address</span>

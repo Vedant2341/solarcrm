@@ -1,0 +1,139 @@
+{
+  "vendorStatuses": {
+    "38": "Interested",
+    "44": "Interested",
+    "47": "Callback",
+    "98": "Callback",
+    "112": "Callback",
+    "163": "Callback",
+    "184": "Interested",
+    "421": "Interested",
+    "467": "Callback",
+    "484": "Callback",
+    "534": "Callback",
+    "579": "Interested",
+    "580": "Callback",
+    "641": "Interested"
+  },
+  "callLogs": {
+    "38": [
+      {
+        "timestamp": "2026-06-10T16:24:49.515Z",
+        "outcome": "Interested",
+        "note": "call tomorrow as they are not using any crm  they may get ready for it",
+        "followUpDate": "2026-06-11"
+      },
+      {
+        "timestamp": "2026-06-10T11:43:12.797Z",
+        "outcome": "Interested",
+        "note": "Dialed phone number. no response call was declined by them call him tomorrow",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "44": [
+      {
+        "timestamp": "2026-06-10T11:31:16.508Z",
+        "outcome": "Interested",
+        "note": "Dialed phone number. is't xwatt technology number so may be both owner same. call 2 days after. he is not picking up phone. call him fri",
+        "followUpDate": "2026-06-12"
+      }
+    ],
+    "47": [
+      {
+        "timestamp": "2026-06-10T16:43:11.159Z",
+        "outcome": "Callback",
+        "note": "tomorrow  number checked ",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "98": [
+      {
+        "timestamp": "2026-06-10T11:18:21.955Z",
+        "outcome": "Callback",
+        "note": "talk to keyurbhai they have alredy developed one and using that just give demo to them on monday",
+        "followUpDate": "2026-06-15"
+      }
+    ],
+    "112": [
+      {
+        "timestamp": "2026-06-10T16:52:18.104Z",
+        "outcome": "Callback",
+        "note": "number verified ,tomorrow",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "163": [
+      {
+        "timestamp": "2026-06-10T16:41:45.281Z",
+        "outcome": "Callback",
+        "note": "tomorrow(number is valid)",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "184": [
+      {
+        "timestamp": "2026-06-10T11:50:28.795Z",
+        "outcome": "Interested",
+        "note": "Dialed phone number . call hi tomorrow",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "421": [
+      {
+        "timestamp": "2026-06-10T11:48:00.483Z",
+        "outcome": "Interested",
+        "note": "Dialed phone number. radha na jode vat thai not req. they are building there own.  try to find out krutika amipara contact this is my comment",
+        "followUpDate": null
+      }
+    ],
+    "467": [
+      {
+        "timestamp": "2026-06-10T16:50:34.166Z",
+        "outcome": "Callback",
+        "note": "call him tomorrow name is Mr Divyesh Pancholi\nhe is sales person and compony is epc and panel and inverter manufacturer ",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "484": [
+      {
+        "timestamp": "2026-06-10T16:44:47.668Z",
+        "outcome": "Callback",
+        "note": "tomorrow number verified",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "534": [
+      {
+        "timestamp": "2026-06-10T11:26:32.807Z",
+        "outcome": "Callback",
+        "note": "Dialed phone number. not picked call tomorrow",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "579": [
+      {
+        "timestamp": "2026-06-10T11:05:41.586Z",
+        "outcome": "Interested",
+        "note": "website given",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "580": [
+      {
+        "timestamp": "2026-06-10T17:13:35.318Z",
+        "outcome": "Callback",
+        "note": "call him tomorrow number verified",
+        "followUpDate": "2026-06-11"
+      }
+    ],
+    "641": [
+      {
+        "timestamp": "2026-06-10T11:51:57.568Z",
+        "outcome": "Interested",
+        "note": "Dialed phone number. not picked up call .   call hi tomorrow",
+        "followUpDate": "2026-06-11"
+      }
+    ]
+  },
+  "exportedAt": "2026-06-10T17:24:12.842Z"
+}

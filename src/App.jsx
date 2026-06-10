@@ -682,23 +682,50 @@ function App() {
           return;
         }
 
+        let vendorsToInsert = uploadedVendors;
+        let skippedCount = 0;
+
         if (action === 'replace') {
           const doubleCheck = window.confirm("WARNING: Wiping the database will delete ALL existing vendors and ALL of your call history. Are you absolutely sure?");
           if (!doubleCheck) return;
 
           const { error: dError } = await supabase.from('vendors').delete().eq('user_id', user.id);
           if (dError) throw dError;
+        } else if (action === 'append') {
+          // De-duplicate: check if vendor name already exists in database
+          const existingNames = new Set(
+            vendors.map(v => v.vendor_name.trim().toLowerCase())
+          );
+
+          vendorsToInsert = uploadedVendors.filter(uv => {
+            const nameKey = uv.vendor_name.trim().toLowerCase();
+            if (existingNames.has(nameKey)) {
+              skippedCount++;
+              return false;
+            }
+            return true;
+          });
+
+          if (vendorsToInsert.length === 0) {
+            alert('All uploaded vendors already exist in your database! No new vendors were added.');
+            return;
+          }
         }
 
         // Bulk insert in chunks of 500
         const chunkSize = 500;
-        for (let i = 0; i < uploadedVendors.length; i += chunkSize) {
-          const chunk = uploadedVendors.slice(i, i + chunkSize);
+        for (let i = 0; i < vendorsToInsert.length; i += chunkSize) {
+          const chunk = vendorsToInsert.slice(i, i + chunkSize);
           const { error: iError } = await supabase.from('vendors').insert(chunk);
           if (iError) throw iError;
         }
 
-        alert(action === 'replace' ? 'Online database replaced successfully!' : 'Vendors successfully appended to your database!');
+        if (action === 'replace') {
+          alert('Online database replaced successfully!');
+        } else {
+          alert(`Import complete! ${vendorsToInsert.length} vendors added to your database. ${skippedCount} duplicate vendors were skipped.`);
+        }
+
         setCurrentPage(1);
         await fetchData();
       } catch (err) {

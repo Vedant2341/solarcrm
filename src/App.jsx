@@ -622,20 +622,52 @@ function App() {
           return;
         }
 
-        const uploadedVendors = rawRows.map((row) => ({
-          vendor_name: row.vendor_name || row.vendorName || row.companyName || 'Unknown Vendor',
-          contact_person: row.contact_person || row.contactPerson || '',
-          email: row.email || '',
-          mobile: row.mobile || row.phone ? String(row.mobile || row.phone).trim() : '',
-          address: row.address || '',
-          website: row.website || row.websiteUrl || '',
-          rating: parseFloat(row.rating) || 0,
-          rating_count: parseInt(row.rating_count || row.ratingCount) || 0,
-          brand: row.brand || '',
-          capacity: parseFloat(row.capacity) || 0,
-          install_count: parseInt(row.install_count || row.installCount) || 0,
-          user_id: user.id
-        }));
+        const uploadedVendors = rawRows.map((row) => {
+          // Resolve brand name from nested array
+          let brandName = '';
+          if (row.brand) {
+            brandName = row.brand;
+          } else if (Array.isArray(row.vendorBrandsList) && row.vendorBrandsList.length > 0) {
+            brandName = row.vendorBrandsList[0].brandName || '';
+          }
+
+          // Resolve installation capacity
+          let installedCapacity = 0;
+          if (row.capacity) {
+            installedCapacity = parseFloat(row.capacity) || 0;
+          } else if (row.statewiseInstallationAndCapacity) {
+            installedCapacity = parseFloat(row.statewiseInstallationAndCapacity.installedCapacity) || 0;
+          } else if (row.nationwiseInstallationAndCapacity) {
+            installedCapacity = parseFloat(row.nationwiseInstallationAndCapacity.installedCapacity) || 0;
+          }
+
+          // Resolve installation count
+          let installationCount = 0;
+          if (row.install_count) {
+            installationCount = parseInt(row.install_count) || 0;
+          } else if (row.installCount) {
+            installationCount = parseInt(row.installCount) || 0;
+          } else if (row.statewiseInstallationAndCapacity) {
+            installationCount = parseInt(row.statewiseInstallationAndCapacity.installationCount) || 0;
+          } else if (row.nationwiseInstallationAndCapacity) {
+            installationCount = parseInt(row.nationwiseInstallationAndCapacity.installationCount) || 0;
+          }
+
+          return {
+            vendor_name: row.vendorName || row.vendor_name || row.companyName || 'Unknown Vendor',
+            contact_person: row.contactPersonName || row.contact_person || row.contactPerson || '',
+            email: row.contactPersonEmail || row.email || '',
+            mobile: row.contactPersonMobile || row.mobile || row.phone ? String(row.contactPersonMobile || row.mobile || row.phone).trim() : '',
+            address: row.address || '',
+            website: row.websiteUrl || row.website || '',
+            rating: parseFloat(row.rating) || 0,
+            rating_count: parseInt(row.consumerRatingCount || row.rating_count || row.ratingCount) || 0,
+            brand: brandName,
+            capacity: installedCapacity,
+            install_count: installationCount,
+            user_id: user.id
+          };
+        });
 
         const actionChoice = window.prompt(`Parsed ${uploadedVendors.length} vendors.\n\nType "replace" to wipe your database and import, or "append" to add these vendors to your list. Leave blank to cancel:`, "append");
         

@@ -823,13 +823,14 @@ function App() {
 
   // --- RENDER MAIN CRM ---
   return (
-    <div className="app-container">
-      
+    <>
       {/* Sidebar Backdrop Overlay */}
       <div className={`sidebar-backdrop ${isSidebarOpen ? 'show' : ''}`} onClick={() => setIsSidebarOpen(false)} />
       
-      {/* --- Sidebar Navigation & Branding --- */}
-      <aside className={`glass-panel sidebar ${isSidebarOpen ? 'open' : ''}`} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '240px' }}>
+      <div className="app-container">
+        
+        {/* --- Sidebar Navigation & Branding --- */}
+        <aside className={`glass-panel sidebar ${isSidebarOpen ? 'open' : ''}`} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px', minWidth: '240px' }}>
         <div className="branding" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ background: 'linear-gradient(135deg, var(--accent-cyan), var(--accent-blue))', padding: '10px', borderRadius: '12px', boxShadow: 'var(--shadow-glow-cyan)' }}>
             <Sun className="pulse-icon" style={{ color: 'white', width: '24px', height: '24px' }} />
@@ -1689,6 +1690,7 @@ function App() {
       )}
 
     </div>
+    </>
   );
 }
 

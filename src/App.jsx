@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import initialVendors from './data/vendors.json';
 import { parseFollowUpDate } from './utils/dateParser.js';
 import { supabase } from './supabaseClient.js';
-import * as XLSX from 'xlsx';
 import { 
   Sun, 
   Phone, 
@@ -591,8 +590,8 @@ function App() {
     }
   };
 
-  // Excel file upload handler in cloud database
-  const handleExcelUpload = async (e) => {
+  // JSON file upload handler in cloud database
+  const handleJsonUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -600,57 +599,85 @@ function App() {
     reader.onload = async (evt) => {
       try {
         setIsLoading(true);
-        const data = evt.target.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rawRows = XLSX.utils.sheet_to_json(sheet);
-
-        if (rawRows.length === 0) {
-          alert('Excel file is empty!');
+        const rawText = evt.target.result;
+        const rawData = JSON.parse(rawText);
+        
+        let rawRows = [];
+        if (Array.isArray(rawData)) {
+          rawRows = rawData;
+        } else if (rawData && typeof rawData === 'object') {
+          if (Array.isArray(rawData.vendors)) {
+            rawRows = rawData.vendors;
+          } else {
+            alert('Invalid JSON structure. Must be an array of vendors.');
+            return;
+          }
+        } else {
+          alert('Invalid JSON file format.');
           return;
         }
 
-        const uploadedVendors = rawRows.map((row, idx) => ({
-          vendor_name: row['Column1.vendorName'] || row['vendorName'] || row['Company Name'] || 'Unknown Vendor',
-          contact_person: row['Column1.contactPersonName'] || row['contactPerson'] || row['Contact Name'] || '',
-          email: row['Column1.contactPersonEmail'] || row['email'] || '',
-          mobile: row['Column1.contactPersonMobile'] || row['mobile'] || row['Phone'] ? String(row['Column1.contactPersonMobile'] || row['mobile'] || row['Phone']).trim() : '',
-          address: row['Column1.address'] || row['address'] || '',
-          website: row['Column1.websiteUrl'] || row['website'] || '',
-          rating: parseFloat(row['Column1.rating'] || row['rating']) || 0,
-          rating_count: parseInt(row['Column1.consumerRatingCount'] || row['ratingCount']) || 0,
-          brand: row['Column1.vendorBrandsList.brandName'] || row['brand'] || '',
-          capacity: parseFloat(row['Column1.statewiseInstallationAndCapacity.installedCapacity'] || row['capacity']) || 0,
-          install_count: parseInt(row['Column1.statewiseInstallationAndCapacity.installationCount'] || row['installCount']) || 0,
+        if (rawRows.length === 0) {
+          alert('JSON file contains 0 vendors!');
+          return;
+        }
+
+        const uploadedVendors = rawRows.map((row) => ({
+          vendor_name: row.vendor_name || row.vendorName || row.companyName || 'Unknown Vendor',
+          contact_person: row.contact_person || row.contactPerson || '',
+          email: row.email || '',
+          mobile: row.mobile || row.phone ? String(row.mobile || row.phone).trim() : '',
+          address: row.address || '',
+          website: row.website || row.websiteUrl || '',
+          rating: parseFloat(row.rating) || 0,
+          rating_count: parseInt(row.rating_count || row.ratingCount) || 0,
+          brand: row.brand || '',
+          capacity: parseFloat(row.capacity) || 0,
+          install_count: parseInt(row.install_count || row.installCount) || 0,
           user_id: user.id
         }));
 
-        if (window.confirm(`Successfully parsed ${uploadedVendors.length} vendors. Replace your online database with this list?`)) {
-          // Delete old records (will cascade delete call logs)
+        const actionChoice = window.prompt(`Parsed ${uploadedVendors.length} vendors.\n\nType "replace" to wipe your database and import, or "append" to add these vendors to your list. Leave blank to cancel:`, "append");
+        
+        if (!actionChoice) {
+          alert("Import cancelled.");
+          return;
+        }
+
+        const action = actionChoice.trim().toLowerCase();
+        if (action !== 'replace' && action !== 'append') {
+          alert("Invalid choice. Import cancelled.");
+          return;
+        }
+
+        if (action === 'replace') {
+          const doubleCheck = window.confirm("WARNING: Wiping the database will delete ALL existing vendors and ALL of your call history. Are you absolutely sure?");
+          if (!doubleCheck) return;
+
           const { error: dError } = await supabase.from('vendors').delete().eq('user_id', user.id);
           if (dError) throw dError;
-
-          // Bulk insert in chunks of 500
-          const chunkSize = 500;
-          for (let i = 0; i < uploadedVendors.length; i += chunkSize) {
-            const chunk = uploadedVendors.slice(i, i + chunkSize);
-            const { error: iError } = await supabase.from('vendors').insert(chunk);
-            if (iError) throw iError;
-          }
-
-          alert('Online database replaced successfully!');
-          setCurrentPage(1);
-          await fetchData();
         }
+
+        // Bulk insert in chunks of 500
+        const chunkSize = 500;
+        for (let i = 0; i < uploadedVendors.length; i += chunkSize) {
+          const chunk = uploadedVendors.slice(i, i + chunkSize);
+          const { error: iError } = await supabase.from('vendors').insert(chunk);
+          if (iError) throw iError;
+        }
+
+        alert(action === 'replace' ? 'Online database replaced successfully!' : 'Vendors successfully appended to your database!');
+        setCurrentPage(1);
+        await fetchData();
       } catch (err) {
         console.error(err);
-        alert('Failed to replace online database. Ensure columns match the standard format.');
+        alert('Failed to import JSON data. Ensure the JSON file is valid.');
       } finally {
         setIsLoading(false);
+        e.target.value = ''; // Reset input
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsText(file);
   };
 
   // Data Export Handler
@@ -1411,22 +1438,22 @@ function App() {
                   </span>
                 </div>
 
-                {/* Import New Excel file */}
+                {/* Import New JSON file */}
                 <div style={{ marginTop: '10px' }}>
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                    Upload New Database (Excel / CSV)
+                    Upload New Database (JSON)
                   </label>
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <label className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '10px 16px', borderRadius: '10px' }}>
-                      <Upload size={16} /> Choose Excel File
+                      <Upload size={16} /> Choose JSON File
                       <input 
                         type="file" 
-                        accept=".xlsx, .xls, .csv" 
-                        onChange={handleExcelUpload} 
+                        accept=".json" 
+                        onChange={handleJsonUpload} 
                         style={{ display: 'none' }} 
                       />
                     </label>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports standard columns (vendorName, contactPerson, mobile, etc.)</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports JSON array of vendors (vendorName, contactPerson, mobile, etc.)</span>
                   </div>
                 </div>
 

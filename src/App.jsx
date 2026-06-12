@@ -3212,35 +3212,54 @@ function App() {
                     const prevSnap = selectedVendorSnapshots[index + 1];
                     const capDiff = prevSnap ? snap.nationwise_capacity - prevSnap.nationwise_capacity : 0;
                     const instDiff = prevSnap ? snap.nationwise_installs - prevSnap.nationwise_installs : 0;
+                    const stateCapDiff = prevSnap ? snap.statewise_capacity - prevSnap.statewise_capacity : 0;
+                    const stateInstDiff = prevSnap ? snap.statewise_installs - prevSnap.statewise_installs : 0;
+                    const distCapDiff = prevSnap ? snap.districtwise_capacity - prevSnap.districtwise_capacity : 0;
+                    const distInstDiff = prevSnap ? snap.districtwise_installs - prevSnap.districtwise_installs : 0;
 
                     return (
-                      <div key={snap.id || index} style={{ padding: '10px 14px', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
-                            Sync Date: {snap.snapshot_date}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                            🌎 Nation: {snap.nationwise_capacity?.toLocaleString()} kW ({snap.nationwise_installs} installs)
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            🏛️ State: {snap.statewise_capacity?.toLocaleString()} kW | 📍 Dist: {snap.districtwise_capacity?.toLocaleString()} kW
-                          </span>
+                      <div key={snap.id || index} style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8rem' }}>
+                        <div style={{ fontWeight: '700', color: 'var(--text-primary)', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '4px' }}>
+                          Sync Date: {snap.snapshot_date}
                         </div>
                         
-                        {prevSnap && (capDiff > 0 || instDiff > 0) && (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                            {capDiff > 0 && (
-                              <span style={{ color: '#10b981', fontWeight: '700' }}>
-                                +{capDiff.toLocaleString()} kW
-                              </span>
-                            )}
-                            {instDiff > 0 && (
-                              <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '3px', background: 'rgba(6, 182, 212, 0.08)', color: 'var(--accent-cyan)', fontWeight: '600' }}>
-                                +{instDiff} installs
-                              </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                              🌎 Nation: {snap.nationwise_capacity?.toLocaleString()} kW ({snap.nationwise_installs || 0} installs)
+                            </span>
+                            {prevSnap && (capDiff > 0 || instDiff > 0) && (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                {capDiff > 0 && <span style={{ color: '#10b981', fontWeight: '700', fontSize: '0.75rem' }}>+{capDiff.toLocaleString()} kW</span>}
+                                {instDiff > 0 && <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '3px', background: 'rgba(6, 182, 212, 0.08)', color: 'var(--accent-cyan)', fontWeight: '600' }}>+{instDiff} inst</span>}
+                              </div>
                             )}
                           </div>
-                        )}
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                              🏛️ State: {snap.statewise_capacity?.toLocaleString()} kW ({snap.statewise_installs || 0} installs)
+                            </span>
+                            {prevSnap && (stateCapDiff > 0 || stateInstDiff > 0) && (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                {stateCapDiff > 0 && <span style={{ color: '#10b981', fontWeight: '700', fontSize: '0.75rem' }}>+{stateCapDiff.toLocaleString()} kW</span>}
+                                {stateInstDiff > 0 && <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '3px', background: 'rgba(6, 182, 212, 0.08)', color: 'var(--accent-cyan)', fontWeight: '600' }}>+{stateInstDiff} inst</span>}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                              📍 District: {snap.districtwise_capacity?.toLocaleString()} kW ({snap.districtwise_installs || 0} installs)
+                            </span>
+                            {prevSnap && (distCapDiff > 0 || distInstDiff > 0) && (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                {distCapDiff > 0 && <span style={{ color: '#10b981', fontWeight: '700', fontSize: '0.75rem' }}>+{distCapDiff.toLocaleString()} kW</span>}
+                                {distInstDiff > 0 && <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '3px', background: 'rgba(6, 182, 212, 0.08)', color: 'var(--accent-cyan)', fontWeight: '600' }}>+{distInstDiff} inst</span>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}

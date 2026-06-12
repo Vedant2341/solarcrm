@@ -3,6 +3,7 @@ package com.example.solarcrm.ui.main
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.solarcrm.data.AuthState
+import com.example.solarcrm.data.CallLog
 import com.example.solarcrm.data.DataRepository
 import com.example.solarcrm.data.Vendor
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,7 @@ class MainScreenViewModel(private val dataRepository: DataRepository) : ViewMode
     val authState: StateFlow<AuthState> = dataRepository.authState
     val isLoading: StateFlow<Boolean> = dataRepository.isLoading
     val error: StateFlow<String?> = dataRepository.error
+    val callLogs: StateFlow<Map<Int, List<CallLog>>> = dataRepository.callLogs
 
     // Navigation and tab selection: "dashboard", "directory", "profile"
     private val _activeTab = MutableStateFlow("dashboard")
@@ -59,6 +61,42 @@ class MainScreenViewModel(private val dataRepository: DataRepository) : ViewMode
 
     fun updateActiveTab(tab: String) {
         _activeTab.value = tab
+    }
+
+    // --- Calendar View State & Logic ---
+    private val _calendarMonthDate = MutableStateFlow(Date())
+    val calendarMonthDate: StateFlow<Date> = _calendarMonthDate.asStateFlow()
+
+    private val _selectedCalendarDay = MutableStateFlow(getTodayString())
+    val selectedCalendarDay: StateFlow<String> = _selectedCalendarDay.asStateFlow()
+
+    val calendarFollowUpDates: StateFlow<Set<String>> = dataRepository.vendors.map { list ->
+        list.mapNotNull { it.latestFollowUp }.toSet()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val selectedDayFollowUps: StateFlow<List<Vendor>> = combine(
+        dataRepository.vendors,
+        _selectedCalendarDay
+    ) { list, selectedDay ->
+        list.filter { it.latestFollowUp == selectedDay }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun nextMonth() {
+        val cal = java.util.Calendar.getInstance()
+        cal.time = _calendarMonthDate.value
+        cal.add(java.util.Calendar.MONTH, 1)
+        _calendarMonthDate.value = cal.time
+    }
+
+    fun prevMonth() {
+        val cal = java.util.Calendar.getInstance()
+        cal.time = _calendarMonthDate.value
+        cal.add(java.util.Calendar.MONTH, -1)
+        _calendarMonthDate.value = cal.time
+    }
+
+    fun selectCalendarDay(dayString: String) {
+        _selectedCalendarDay.value = dayString
     }
 
     // Dynamic lists of states and districts
@@ -114,6 +152,9 @@ class MainScreenViewModel(private val dataRepository: DataRepository) : ViewMode
             "Nation-wide Capacity" -> filtered = filtered.sortedByDescending { it.nationwiseCapacity }
             "State-wide Capacity" -> filtered = filtered.sortedByDescending { it.statewiseCapacity }
             "District-wide Capacity" -> filtered = filtered.sortedByDescending { it.districtwiseCapacity }
+            "Nation-wide Installs" -> filtered = filtered.sortedByDescending { it.nationwiseInstalls }
+            "State-wide Installs" -> filtered = filtered.sortedByDescending { it.statewiseInstalls }
+            "District-wide Installs" -> filtered = filtered.sortedByDescending { it.districtwiseInstalls }
             "Installs" -> filtered = filtered.sortedByDescending { it.nationwiseInstalls }
         }
 

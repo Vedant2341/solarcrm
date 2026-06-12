@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.solarcrm.data.AuthState
+import com.example.solarcrm.data.CallLog
 import com.example.solarcrm.data.DefaultDataRepository
 import com.example.solarcrm.data.Vendor
 import java.text.SimpleDateFormat
@@ -239,6 +240,9 @@ fun AuthenticatedApp(
 ) {
     val activeTab by viewModel.activeTab.collectAsStateWithLifecycle()
     val selectedVendorForCall by viewModel.selectedVendorForCall.collectAsStateWithLifecycle()
+    val callLogsMap by viewModel.callLogs.collectAsStateWithLifecycle()
+
+    var selectedVendorForDetails by remember { mutableStateOf<Vendor?>(null) }
 
     // Load database on launch
     LaunchedEffect(Unit) {
@@ -294,6 +298,19 @@ fun AuthenticatedApp(
                     )
                 )
                 NavigationBarItem(
+                    selected = activeTab == "calendar",
+                    onClick = { viewModel.updateActiveTab("calendar") },
+                    icon = { Icon(Icons.Default.DateRange, contentDescription = "Calendar") },
+                    label = { Text("Calendar") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = AccentCyan,
+                        selectedTextColor = AccentCyan,
+                        unselectedIconColor = TextSecondary,
+                        unselectedTextColor = TextSecondary,
+                        indicatorColor = SurfaceBg
+                    )
+                )
+                NavigationBarItem(
                     selected = activeTab == "profile",
                     onClick = { viewModel.updateActiveTab("profile") },
                     icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
@@ -316,8 +333,19 @@ fun AuthenticatedApp(
                 .padding(innerPadding)
         ) {
             when (activeTab) {
-                "dashboard" -> DashboardScreen(session = session, viewModel = viewModel)
-                "directory" -> DirectoryScreen(viewModel = viewModel)
+                "dashboard" -> DashboardScreen(
+                    session = session,
+                    viewModel = viewModel,
+                    onVendorClick = { selectedVendorForDetails = it }
+                )
+                "directory" -> DirectoryScreen(
+                    viewModel = viewModel,
+                    onVendorClick = { selectedVendorForDetails = it }
+                )
+                "calendar" -> CalendarScreen(
+                    viewModel = viewModel,
+                    onVendorClick = { selectedVendorForDetails = it }
+                )
                 "profile" -> ProfileScreen(session = session, onLogout = { viewModel.logout() })
             }
 
@@ -331,6 +359,18 @@ fun AuthenticatedApp(
                     }
                 )
             }
+
+            // Lead details dialog
+            selectedVendorForDetails?.let { vendor ->
+                val latestVendor = viewModel.filteredVendors.collectAsStateWithLifecycle().value.find { it.id == vendor.id } ?: vendor
+                val logs = callLogsMap[latestVendor.id] ?: emptyList<CallLog>()
+                LeadDetailsDialog(
+                    vendor = latestVendor,
+                    callLogs = logs,
+                    onDismiss = { selectedVendorForDetails = null },
+                    onCallLogClick = { viewModel.showCallLogDialog(latestVendor) }
+                )
+            }
         }
     }
 }
@@ -339,7 +379,8 @@ fun AuthenticatedApp(
 @Composable
 fun DashboardScreen(
     session: AuthState.LoggedIn,
-    viewModel: MainScreenViewModel
+    viewModel: MainScreenViewModel,
+    onVendorClick: (Vendor) -> Unit
 ) {
     val stats by viewModel.dashboardStats.collectAsStateWithLifecycle()
     val todayFollowUps by viewModel.todayFollowUpVendors.collectAsStateWithLifecycle()
@@ -429,7 +470,8 @@ fun DashboardScreen(
                 items(todayFollowUps, key = { it.id }) { vendor ->
                     VendorItemCard(
                         vendor = vendor,
-                        onCallLogClick = { viewModel.showCallLogDialog(vendor) }
+                        onCallLogClick = { viewModel.showCallLogDialog(vendor) },
+                        onCardClick = { onVendorClick(vendor) }
                     )
                 }
             }
@@ -472,7 +514,8 @@ fun StatCard(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DirectoryScreen(
-    viewModel: MainScreenViewModel
+    viewModel: MainScreenViewModel,
+    onVendorClick: (Vendor) -> Unit
 ) {
     val searchVal by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedState by viewModel.selectedState.collectAsStateWithLifecycle()
@@ -487,7 +530,15 @@ fun DirectoryScreen(
     var districtExpanded by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
 
-    val sortOptions = listOf("Name", "Nation-wide Capacity", "State-wide Capacity", "District-wide Capacity", "Installs")
+    val sortOptions = listOf(
+        "Name",
+        "Nation-wide Capacity",
+        "State-wide Capacity",
+        "District-wide Capacity",
+        "Nation-wide Installs",
+        "State-wide Installs",
+        "District-wide Installs"
+    )
 
     Column(
         modifier = Modifier
@@ -673,7 +724,8 @@ fun DirectoryScreen(
                 items(filteredVendors, key = { it.id }) { vendor ->
                     VendorItemCard(
                         vendor = vendor,
-                        onCallLogClick = { viewModel.showCallLogDialog(vendor) }
+                        onCallLogClick = { viewModel.showCallLogDialog(vendor) },
+                        onCardClick = { onVendorClick(vendor) }
                     )
                 }
             }
@@ -685,7 +737,8 @@ fun DirectoryScreen(
 @Composable
 fun VendorItemCard(
     vendor: Vendor,
-    onCallLogClick: () -> Unit
+    onCallLogClick: () -> Unit,
+    onCardClick: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -699,7 +752,8 @@ fun VendorItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, BorderColor, RoundedCornerShape(16.dp)),
+            .border(1.dp, BorderColor, RoundedCornerShape(16.dp))
+            .clickable { onCardClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceBg)
     ) {
@@ -757,22 +811,25 @@ fun VendorItemCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Capacities
+            // Capacities (Stacked Capacity & Installations vertically)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text("Nationwide Cap", color = TextSecondary, fontSize = 10.sp)
-                    Text("${vendor.nationwiseCapacity} kW (${vendor.nationwiseInstalls})", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Nationwide", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${vendor.nationwiseCapacity} kW", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("${vendor.nationwiseInstalls} installs", color = AccentTeal, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
-                Column {
-                    Text("Statewide Cap", color = TextSecondary, fontSize = 10.sp)
-                    Text("${vendor.statewiseCapacity} kW (${vendor.statewiseInstalls})", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Statewide", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${vendor.statewiseCapacity} kW", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("${vendor.statewiseInstalls} installs", color = AccentTeal, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
-                Column {
-                    Text("District Cap", color = TextSecondary, fontSize = 10.sp)
-                    Text("${vendor.districtwiseCapacity} kW (${vendor.districtwiseInstalls})", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("District-wide", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${vendor.districtwiseCapacity} kW", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("${vendor.districtwiseInstalls} installs", color = AccentTeal, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
             }
 
@@ -876,6 +933,294 @@ fun VendorItemCard(
             }
         }
     }
+}
+
+// --- LEAD DETAILS DIALOG POPUP ---
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LeadDetailsDialog(
+    vendor: Vendor,
+    callLogs: List<CallLog>,
+    onDismiss: () -> Unit,
+    onCallLogClick: () -> Unit
+) {
+    val context = LocalContext.current
+
+    val statusColors = when (vendor.status) {
+        "Interested" -> Pair(Color(0xFF065F46), Color(0xFF34D399))
+        "Callback" -> Pair(Color(0xFF78350F), Color(0xFFFBBF24))
+        "Uninterested" -> Pair(Color(0xFF991B1B), Color(0xFFFCA5A5))
+        else -> Pair(Color(0xFF334155), Color(0xFF94A3B8)) // Pending
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = vendor.vendorName,
+                    color = TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Clear, contentDescription = "Close", tint = TextSecondary)
+                }
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    // Status & location
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(statusColors.first, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(vendor.status, color = statusColors.second, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Text("📍 ${vendor.state} > ${vendor.district}", color = AccentCyan, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    }
+                }
+
+                item {
+                    // Contact Info card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, BorderColor, RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Contact Details", color = AccentTeal, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            
+                            vendor.contactPersonName?.let {
+                                Text("👤 Person: $it", color = TextPrimary, fontSize = 12.sp)
+                            }
+                            vendor.contactPersonMobile?.let {
+                                Text("📞 Mobile: $it", color = TextPrimary, fontSize = 12.sp)
+                            }
+                            vendor.contactPersonEmail?.let {
+                                Text("✉️ Email: $it", color = TextPrimary, fontSize = 12.sp)
+                            }
+                            vendor.websiteUrl?.let { url ->
+                                Text("🌐 Website: $url", color = AccentCyan, fontSize = 12.sp, modifier = Modifier.clickable {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(if (url.startsWith("http")) url else "https://$url"))
+                                    context.startActivity(intent)
+                                })
+                            }
+                            Text("🏠 Address: ${vendor.address}", color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                item {
+                    // Rating & Brands
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, BorderColor, RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Rating & Request Type", color = AccentTeal, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("⭐ Rating: ${vendor.rating} / 5.0 (${vendor.consumerRatingCount} reviews)", color = TextPrimary, fontSize = 12.sp)
+                            vendor.userRequestType?.let {
+                                Text("Type: $it", color = TextPrimary, fontSize = 12.sp)
+                            }
+                            if (vendor.vendorBrandsList.isNotEmpty()) {
+                                Text("Brands:", color = TextSecondary, fontSize = 12.sp)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    vendor.vendorBrandsList.forEach { brand ->
+                                        Box(
+                                            modifier = Modifier
+                                                .background(BorderColor, RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(brand, color = TextPrimary, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    // Capacities detail
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, BorderColor, RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Solar Capacities & Installations", color = AccentTeal, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Nationwide", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${vendor.nationwiseCapacity} kW", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("${vendor.nationwiseInstalls} installs", color = AccentTeal, fontSize = 11.sp)
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Statewide", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${vendor.statewiseCapacity} kW", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("${vendor.statewiseInstalls} installs", color = AccentTeal, fontSize = 11.sp)
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("District-wide", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${vendor.districtwiseCapacity} kW", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("${vendor.districtwiseInstalls} installs", color = AccentTeal, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    // Call History Timeline
+                    Text("Call History Logs", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    if (callLogs.isEmpty()) {
+                        Text("No discussions logged yet.", color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                }
+
+                items(callLogs) { log ->
+                    val logOutcomeColors = when (log.outcome) {
+                        "Interested" -> Pair(Color(0xFF065F46), Color(0xFF34D399))
+                        "Callback" -> Pair(Color(0xFF78350F), Color(0xFFFBBF24))
+                        "Uninterested" -> Pair(Color(0xFF991B1B), Color(0xFFFCA5A5))
+                        else -> Pair(Color(0xFF334155), Color(0xFF94A3B8))
+                    }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, BorderColor, RoundedCornerShape(8.dp)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(logOutcomeColors.first, RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(log.outcome, color = logOutcomeColors.second, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                }
+                                Text(
+                                    text = if (log.timestamp.length > 10) log.timestamp.substring(0, 10) else log.timestamp,
+                                    color = TextSecondary,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Text(log.note, color = TextPrimary, fontSize = 11.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("By: ${log.userName}", color = AccentTeal, fontSize = 9.sp)
+                                log.followUpDate?.let {
+                                    Text("Follow up: $it", color = AccentCyan, fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Dial Button
+                Button(
+                    onClick = {
+                        val mobile = vendor.contactPersonMobile
+                        if (!mobile.isNullOrBlank()) {
+                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$mobile"))
+                            context.startActivity(intent)
+                        } else {
+                            Toast.makeText(context, "No contact number listed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CardBg),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.weight(1f).border(1.dp, BorderColor, RoundedCornerShape(8.dp))
+                ) {
+                    Icon(Icons.Default.Phone, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Call", color = TextPrimary, fontSize = 12.sp)
+                }
+
+                // WhatsApp Button
+                Button(
+                    onClick = {
+                        val mobile = vendor.contactPersonMobile
+                        if (!mobile.isNullOrBlank()) {
+                            val cleaned = mobile.replace(Regex("\\D"), "")
+                            if (cleaned.isNotEmpty()) {
+                                val formatted = if (cleaned.length == 10) "91$cleaned" else cleaned
+                                val url = "https://wa.me/$formatted"
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                context.startActivity(intent)
+                            } else {
+                                Toast.makeText(context, "Invalid number formatted", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "No contact number listed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CardBg),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.weight(1.2f).border(1.dp, BorderColor, RoundedCornerShape(8.dp))
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = null, tint = AccentTeal, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("WhatsApp", color = TextPrimary, fontSize = 12.sp, maxLines = 1)
+                }
+
+                // Log outcome Button
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onCallLogClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1.3f)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Log Call", color = Color.White, fontSize = 12.sp, maxLines = 1)
+                }
+            }
+        },
+        containerColor = SurfaceBg,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.85f)
+    )
 }
 
 // --- PROFILE SCREEN ---
@@ -1099,4 +1444,225 @@ fun LogCallDialog(
         containerColor = SurfaceBg,
         shape = RoundedCornerShape(16.dp)
     )
+}
+
+// --- CALENDAR VIEW SCREEN ---
+@Composable
+fun CalendarScreen(
+    viewModel: MainScreenViewModel,
+    onVendorClick: (Vendor) -> Unit
+) {
+    val context = LocalContext.current
+    val calendarMonthDate by viewModel.calendarMonthDate.collectAsStateWithLifecycle()
+    val selectedCalendarDay by viewModel.selectedCalendarDay.collectAsStateWithLifecycle()
+    val calendarFollowUpDates by viewModel.calendarFollowUpDates.collectAsStateWithLifecycle()
+    val selectedDayFollowUps by viewModel.selectedDayFollowUps.collectAsStateWithLifecycle()
+
+    val monthFormat = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
+    val cellDateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val dayNumberFormat = remember { SimpleDateFormat("d", Locale.getDefault()) }
+    val todayString = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
+
+    // Generate grid days for the month
+    val daysList = remember(calendarMonthDate) {
+        val cal = Calendar.getInstance()
+        cal.time = calendarMonthDate
+        cal.set(Calendar.DAY_OF_MONTH, 1)
+        val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+        val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+        
+        val list = mutableListOf<Date?>()
+        // Pad days before the first day of the month
+        for (i in 1 until firstDayOfWeek) {
+            list.add(null)
+        }
+        // Add current month days
+        for (day in 1..maxDays) {
+            cal.set(Calendar.DAY_OF_MONTH, day)
+            list.add(cal.time)
+        }
+        list
+    }
+    val weeks = daysList.chunked(7)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Month Navigation Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { viewModel.prevMonth() }) {
+                Icon(imageVector = Icons.Default.KeyboardArrowLeft, contentDescription = "Previous Month", tint = AccentCyan)
+            }
+            Text(
+                text = monthFormat.format(calendarMonthDate),
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+            IconButton(onClick = { viewModel.nextMonth() }) {
+                Icon(imageVector = Icons.Default.KeyboardArrowRight, contentDescription = "Next Month", tint = AccentCyan)
+            }
+        }
+
+        // Days of week header labels
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val daysOfWeek = listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")
+            daysOfWeek.forEach { day ->
+                Text(
+                    text = day,
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // Month Grid Layout
+        Card(
+            colors = CardDefaults.cardColors(containerColor = SurfaceBg),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, BorderColor, RoundedCornerShape(16.dp)),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(8.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                weeks.forEach { week ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val paddedWeek = week.toMutableList()
+                        while (paddedWeek.size < 7) {
+                            paddedWeek.add(null)
+                        }
+
+                        paddedWeek.forEach { day ->
+                            if (day == null) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            } else {
+                                val dateStr = cellDateFormat.format(day)
+                                val isSelected = dateStr == selectedCalendarDay
+                                val isToday = dateStr == todayString
+                                val hasFollowUps = calendarFollowUpDates.contains(dateStr)
+                                val dayNum = dayNumberFormat.format(day)
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .padding(2.dp)
+                                        .background(
+                                            color = if (isSelected) AccentCyan else Color.Transparent,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .border(
+                                            width = if (isToday && !isSelected) 1.dp else 0.dp,
+                                            color = if (isToday && !isSelected) AccentTeal else Color.Transparent,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable { viewModel.selectCalendarDay(dateStr) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = dayNum,
+                                            color = if (isSelected) Color.Black else TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        if (hasFollowUps) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .background(
+                                                        color = if (isSelected) Color.Black else AccentCyan,
+                                                        shape = androidx.compose.foundation.shape.CircleShape
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Selected Day Title
+        Text(
+            text = "Follow-ups for ${
+                if (selectedCalendarDay == todayString) "Today"
+                else {
+                    try {
+                        val parsed = cellDateFormat.parse(selectedCalendarDay)
+                        SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(parsed!!)
+                    } catch (e: Exception) {
+                        selectedCalendarDay
+                    }
+                }
+            }",
+            color = TextPrimary,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+
+        // Leads list scheduled for the selected day
+        if (selectedDayFollowUps.isEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceBg),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No follow-ups scheduled for this day.",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(selectedDayFollowUps, key = { it.id }) { vendor ->
+                    VendorItemCard(
+                        vendor = vendor,
+                        onCallLogClick = { viewModel.showCallLogDialog(vendor) },
+                        onCardClick = { onVendorClick(vendor) }
+                    )
+                }
+            }
+        }
+    }
 }

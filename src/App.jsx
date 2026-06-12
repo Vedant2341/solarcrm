@@ -432,13 +432,31 @@ function App() {
 
   // --- Helper to synchronize/upsert incoming vendors with Supabase using name-based de-duplication ---
   const syncVendorsWithDb = async (incomingVendors) => {
-    // 1. Fetch current vendors from DB to ensure we have the absolute latest records
-    const { data: dbVendors, error: fetchError } = await supabase
-      .from('vendors')
-      .select('*');
+    // 1. Fetch current vendors from DB paginated to bypass PostgREST's 1000 record select limit
+    let allExistingVendors = [];
+    let page = 0;
+    let hasMore = true;
+    const pageSize = 1000;
     
-    if (fetchError) throw fetchError;
-    const existingVendors = dbVendors || [];
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('*')
+        .range(page * pageSize, (page + 1) * pageSize - 1)
+        .order('id', { ascending: true });
+        
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        allExistingVendors = [...allExistingVendors, ...data];
+        page++;
+        if (data.length < pageSize) {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
 
     // Normalization functions for robust comparison
     const cleanStr = (s) => (s === null || s === undefined ? '' : String(s).trim());
@@ -471,14 +489,15 @@ function App() {
       }
     }
 
-    let vendorsToUpsert = [];
+    let vendorsToInsert = [];
+    let vendorsToUpdate = [];
     let updatedCount = 0;
     let insertedCount = 0;
     let skippedCount = 0;
 
     uniqueIncoming.forEach(uv => {
       // Find matching existing vendor by company name (trimmed, case-insensitive)
-      const existing = existingVendors.find(v => 
+      const existing = allExistingVendors.find(v => 
         cleanStr(v.vendor_name).toLowerCase() === cleanStr(uv.vendor_name).toLowerCase()
       );
 
@@ -506,7 +525,7 @@ function App() {
 
         if (hasChanged) {
           // Update the existing row by specifying its database primary key 'id'
-          vendorsToUpsert.push({
+          vendorsToUpdate.push({
             ...uv,
             id: existing.id,
             assigned_to: existing.assigned_to, // Keep existing user assignment
@@ -518,16 +537,28 @@ function App() {
         }
       } else {
         // Brand new company name, insert as new entry
-        vendorsToUpsert.push(uv);
+        vendorsToInsert.push(uv);
         insertedCount++;
       }
     });
 
-    if (vendorsToUpsert.length > 0) {
-      // Chunk into blocks of 200 to avoid payload size limits
+    // 1. Bulk Insert for brand new records (without 'id' property so Postgres auto-generates the serial primary key)
+    if (vendorsToInsert.length > 0) {
       const chunkSize = 200;
-      for (let i = 0; i < vendorsToUpsert.length; i += chunkSize) {
-        const chunk = vendorsToUpsert.slice(i, i + chunkSize);
+      for (let i = 0; i < vendorsToInsert.length; i += chunkSize) {
+        const chunk = vendorsToInsert.slice(i, i + chunkSize);
+        const { error: insertError } = await supabase
+          .from('vendors')
+          .insert(chunk);
+        if (insertError) throw insertError;
+      }
+    }
+
+    // 2. Bulk Upsert (Update) for existing records (with 'id' property specified to update existing rows)
+    if (vendorsToUpdate.length > 0) {
+      const chunkSize = 200;
+      for (let i = 0; i < vendorsToUpdate.length; i += chunkSize) {
+        const chunk = vendorsToUpdate.slice(i, i + chunkSize);
         const { error: upsertError } = await supabase
           .from('vendors')
           .upsert(chunk);

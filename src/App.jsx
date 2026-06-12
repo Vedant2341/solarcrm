@@ -1692,12 +1692,14 @@ function App() {
             )}
           </button>
           
-          <button 
-            onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }} 
-            className={`nav-btn ${activeTab === 'settings' ? 'active' : ''}`}
-          >
-            <FileText size={18} /> Database Admin
-          </button>
+          {(userRole === 'admin' || (user && user.email?.toLowerCase() === 'vedant@vijapur.in')) && (
+            <button 
+              onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }} 
+              className={`nav-btn ${activeTab === 'settings' ? 'active' : ''}`}
+            >
+              <FileText size={18} /> Database Admin
+            </button>
+          )}
 
           {/* Logout Button */}
           <button 
@@ -2659,7 +2661,7 @@ function App() {
         )}
 
         {/* --- PANEL: DATABASE ADMIN / SETTINGS --- */}
-        {activeTab === 'settings' && (
+        {activeTab === 'settings' && (userRole === 'admin' || (user && user.email?.toLowerCase() === 'vedant@vijapur.in')) && (
           <div className="animate-fade-in admin-grid">
             
             {/* Database Admin Card */}

@@ -38,6 +38,64 @@ import {
 const LOGS_STORAGE_KEY = 'solar_crm_call_logs';
 const STATUS_STORAGE_KEY = 'solar_crm_status';
 
+// Helper to parse address and extract state and district
+const getVendorLocation = (address) => {
+  if (!address) return { state: 'Unknown', district: 'Unknown' };
+  
+  const addrLower = address.toLowerCase();
+
+  // 1. Identify State
+  let state = 'Gujarat'; // Default for this database
+  const statesList = [
+    { name: 'Maharashtra', keywords: ['maharashtra', 'mumbai', 'pune', 'nagpur', 'thane'] },
+    { name: 'Delhi', keywords: ['delhi', 'new delhi', 'ncr'] },
+    { name: 'Rajasthan', keywords: ['rajasthan', 'jaipur', 'jodhpur', 'udaipur', 'ajmer'] },
+    { name: 'Uttar Pradesh', keywords: ['uttar pradesh', 'up', 'noida', 'lucknow', 'kanpur'] },
+    { name: 'Haryana', keywords: ['haryana', 'gurgaon', 'gurugram', 'faridabad'] },
+    { name: 'Chhattisgarh', keywords: ['chhattisgarh', 'raipur', 'bilaspur'] },
+    { name: 'Goa', keywords: ['goa', 'panaji', 'margao'] },
+    { name: 'Punjab', keywords: ['punjab', 'ludhiana', 'amritsar'] },
+    { name: 'Bihar', keywords: ['bihar', 'patna'] },
+    { name: 'Odisha', keywords: ['odisha', 'bhubaneswar'] },
+    { name: 'Kerala', keywords: ['kerala', 'kochi', 'trivandrum'] }
+  ];
+
+  for (const s of statesList) {
+    if (s.keywords.some(kw => addrLower.includes(kw))) {
+      state = s.name;
+      break;
+    }
+  }
+
+  // 2. Identify District/City in Gujarat (or generally)
+  let district = 'Other';
+  const gujaratDistricts = [
+    'Ahmedabad', 'Surat', 'Rajkot', 'Vadodara', 'Bhavnagar', 'Gandhinagar', 'Anand', 'Junagadh', 
+    'Jamnagar', 'Mehsana', 'Morbi', 'Amreli', 'Navsari', 'Bharuch', 'Palanpur', 'Banaskantha', 
+    'Patan', 'Nadiad', 'Botad', 'Gondal', 'Keshod', 'Kutch', 'Kachchh', 'Valsad', 'Vyara', 
+    'Tapi', 'Panchmahal', 'Surendranagar', 'Godhra', 'Vapi', 'Ankleshwar', 'Bhuj', 'Gandhidham',
+    'Sanand', 'Deesa', 'Talod', 'Dhoraji', 'Babra', 'Karamsad', 'Padra'
+  ];
+
+  for (const dist of gujaratDistricts) {
+    const regex = new RegExp('\\b' + dist.toLowerCase() + '\\b', 'i');
+    if (regex.test(addrLower)) {
+      district = dist === 'Kachchh' ? 'Kutch' : dist;
+      break;
+    }
+  }
+
+  // Fallback for non-Gujarat states' major cities
+  if (district === 'Other') {
+    if (addrLower.includes('mumbai') || addrLower.includes('andheri')) district = 'Mumbai';
+    else if (addrLower.includes('noida')) district = 'Noida';
+    else if (addrLower.includes('gurgaon') || addrLower.includes('gurugram')) district = 'Gurugram';
+    else if (addrLower.includes('jaipur')) district = 'Jaipur';
+  }
+
+  return { state, district };
+};
+
 // Guard to prevent double seeding in React StrictMode
 let isSeedingActive = false;
 
@@ -94,6 +152,16 @@ function App() {
   const [ratingFilter, setRatingFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
+
+  const [stateFilter, setStateFilter] = useState('All');
+  const [districtFilter, setDistrictFilter] = useState('All');
+  const [sortBy, setSortBy] = useState('capacity');
+  const [sortOrder, setSortOrder] = useState('desc');
+
+  // --- Dashboard Analytics States ---
+  const [dashboardStateSortOrder, setDashboardStateSortOrder] = useState('desc');
+  const [dashboardDistrictSortOrder, setDashboardDistrictSortOrder] = useState('desc');
+  const [dashboardSelectedState, setDashboardSelectedState] = useState('Gujarat');
 
   // --- Calendar Navigation ---
   const [calendarDate, setCalendarDate] = useState(new Date());
@@ -312,43 +380,190 @@ function App() {
     }
   };
 
-  // --- Auto-Seeding: Bulk insert 1799 default vendors to cloud ---
-  const seedDefaultVendors = async () => {
+  // --- JSON Schema Mapper for nikunj.json ---
+  const mapJsonToDbVendor = (v, userId) => {
+    // Resolve brand names from nested list
+    let brands = [];
+    if (Array.isArray(v.vendorBrandsList)) {
+      brands = v.vendorBrandsList.map(b => typeof b === 'object' && b ? b.brandName : String(b)).filter(Boolean);
+    } else if (Array.isArray(v.vendor_brands_list)) {
+      brands = v.vendor_brands_list;
+    }
+
+    return {
+      vendor_id: v.vendorId || v.vendor_id || null,
+      vendor_name: v.vendorName || v.vendor_name || 'Unnamed Vendor',
+      previous_vendor_name: v.previousVendorName || v.previous_vendor_name || null,
+      contact_person_name: v.contactPersonName || v.contact_person_name || v.contact_person || v.contactPerson || null,
+      contact_person_email: v.contactPersonEmail || v.contact_person_email || v.email || null,
+      contact_person_mobile: v.contactPersonMobile || v.contact_person_mobile || v.mobile || v.phone ? String(v.contactPersonMobile || v.contact_person_mobile || v.mobile || v.phone).trim() : null,
+      address: v.address || '',
+      website_url: v.websiteUrl || v.website_url || v.website || null,
+      discom_json: v.discomJson || v.discom_json || null,
+      rating: v.rating !== undefined && v.rating !== null ? parseFloat(v.rating) : 0,
+      consumer_rating_count: v.consumerRatingCount !== undefined && v.consumerRatingCount !== null ? parseInt(v.consumerRatingCount) : (v.rating_count !== undefined ? parseInt(v.rating_count) : 0),
+      vendor_brands_list: brands,
+      user_request_type: v.userRequestType || v.user_request_type || null,
+      
+      nationwise_capacity: v.nationwiseInstallationAndCapacity?.installedCapacity !== undefined 
+        ? parseFloat(v.nationwiseInstallationAndCapacity.installedCapacity) 
+        : (v.nationwise_capacity !== undefined ? parseFloat(v.nationwise_capacity) : 0),
+      nationwise_installs: v.nationwiseInstallationAndCapacity?.installationCount !== undefined 
+        ? parseInt(v.nationwiseInstallationAndCapacity.installationCount) 
+        : (v.nationwise_installs !== undefined ? parseInt(v.nationwise_installs) : 0),
+        
+      statewise_capacity: v.statewiseInstallationAndCapacity?.installedCapacity !== undefined 
+        ? parseFloat(v.statewiseInstallationAndCapacity.installedCapacity) 
+        : (v.statewise_capacity !== undefined ? parseFloat(v.statewise_capacity) : 0),
+      statewise_installs: v.statewiseInstallationAndCapacity?.installationCount !== undefined 
+        ? parseInt(v.statewiseInstallationAndCapacity.installationCount) 
+        : (v.statewise_installs !== undefined ? parseInt(v.statewise_installs) : 0),
+        
+      districtwise_capacity: v.districtwiseInstallationAndCapacity?.installedCapacity !== undefined 
+        ? parseFloat(v.districtwiseInstallationAndCapacity.installedCapacity) 
+        : (v.districtwise_capacity !== undefined ? parseFloat(v.districtwise_capacity) : 0),
+      districtwise_installs: v.districtwiseInstallationAndCapacity?.installationCount !== undefined 
+        ? parseInt(v.districtwiseInstallationAndCapacity.installationCount) 
+        : (v.districtwise_installs !== undefined ? parseInt(v.districtwise_installs) : 0),
+        
+      user_id: userId
+    };
+  };
+
+  // --- Helper to synchronize/upsert incoming vendors with Supabase using name-based de-duplication ---
+  const syncVendorsWithDb = async (incomingVendors) => {
+    // 1. Fetch current vendors from DB to ensure we have the absolute latest records
+    const { data: dbVendors, error: fetchError } = await supabase
+      .from('vendors')
+      .select('*');
+    
+    if (fetchError) throw fetchError;
+    const existingVendors = dbVendors || [];
+
+    // Normalization functions for robust comparison
+    const cleanStr = (s) => (s === null || s === undefined ? '' : String(s).trim());
+    const cleanNum = (n) => (n === null || n === undefined || isNaN(Number(n)) ? 0 : Number(n));
+    const cleanJson = (j) => {
+      if (!j) return 'null';
+      try {
+        return JSON.stringify(j);
+      } catch (e) {
+        return 'null';
+      }
+    };
+    const cleanArray = (arr) => {
+      if (!arr) return '[]';
+      const arrayVal = Array.isArray(arr) ? arr : [arr];
+      const cleaned = arrayVal.map(x => cleanStr(x)).filter(Boolean).sort();
+      return JSON.stringify(cleaned);
+    };
+
+    // Pre-pass: de-duplicate incoming vendors by company name (trimmed, case-insensitive) to prevent database conflicts
+    const uniqueIncoming = [];
+    const seenNames = new Set();
+    
+    for (let i = incomingVendors.length - 1; i >= 0; i--) {
+      const uv = incomingVendors[i];
+      const nameKey = cleanStr(uv.vendor_name).toLowerCase();
+      if (!seenNames.has(nameKey)) {
+        seenNames.add(nameKey);
+        uniqueIncoming.unshift(uv); // Preserve original order
+      }
+    }
+
+    let vendorsToUpsert = [];
+    let updatedCount = 0;
+    let insertedCount = 0;
+    let skippedCount = 0;
+
+    uniqueIncoming.forEach(uv => {
+      // Find matching existing vendor by company name (trimmed, case-insensitive)
+      const existing = existingVendors.find(v => 
+        cleanStr(v.vendor_name).toLowerCase() === cleanStr(uv.vendor_name).toLowerCase()
+      );
+
+      if (existing) {
+        // Compare fields to see if anything changed
+        const hasChanged = 
+          cleanNum(uv.vendor_id) !== cleanNum(existing.vendor_id) ||
+          cleanStr(uv.previous_vendor_name) !== cleanStr(existing.previous_vendor_name) ||
+          cleanStr(uv.contact_person_name) !== cleanStr(existing.contact_person_name) ||
+          cleanStr(uv.contact_person_email) !== cleanStr(existing.contact_person_email) ||
+          cleanStr(uv.contact_person_mobile) !== cleanStr(existing.contact_person_mobile) ||
+          cleanStr(uv.address) !== cleanStr(existing.address) ||
+          cleanStr(uv.website_url) !== cleanStr(existing.website_url) ||
+          cleanNum(uv.rating) !== cleanNum(existing.rating) ||
+          cleanNum(uv.consumer_rating_count) !== cleanNum(existing.consumer_rating_count) ||
+          cleanStr(uv.user_request_type) !== cleanStr(existing.user_request_type) ||
+          cleanNum(uv.nationwise_capacity) !== cleanNum(existing.nationwise_capacity) ||
+          cleanNum(uv.nationwise_installs) !== cleanNum(existing.nationwise_installs) ||
+          cleanNum(uv.statewise_capacity) !== cleanNum(existing.statewise_capacity) ||
+          cleanNum(uv.statewise_installs) !== cleanNum(existing.statewise_installs) ||
+          cleanNum(uv.districtwise_capacity) !== cleanNum(existing.districtwise_capacity) ||
+          cleanNum(uv.districtwise_installs) !== cleanNum(existing.districtwise_installs) ||
+          cleanArray(uv.vendor_brands_list) !== cleanArray(existing.vendor_brands_list) ||
+          cleanJson(uv.discom_json) !== cleanJson(existing.discom_json);
+
+        if (hasChanged) {
+          // Update the existing row by specifying its database primary key 'id'
+          vendorsToUpsert.push({
+            ...uv,
+            id: existing.id,
+            assigned_to: existing.assigned_to, // Keep existing user assignment
+            user_id: existing.user_id // Keep existing owner user_id
+          });
+          updatedCount++;
+        } else {
+          skippedCount++;
+        }
+      } else {
+        // Brand new company name, insert as new entry
+        vendorsToUpsert.push(uv);
+        insertedCount++;
+      }
+    });
+
+    if (vendorsToUpsert.length > 0) {
+      // Chunk into blocks of 200 to avoid payload size limits
+      const chunkSize = 200;
+      for (let i = 0; i < vendorsToUpsert.length; i += chunkSize) {
+        const chunk = vendorsToUpsert.slice(i, i + chunkSize);
+        const { error: upsertError } = await supabase
+          .from('vendors')
+          .upsert(chunk);
+        if (upsertError) throw upsertError;
+      }
+    }
+
+    return { insertedCount, updatedCount, skippedCount };
+  };
+
+  // --- Auto-Seeding: Bulk upsert default vendors to cloud ---
+  const seedDefaultVendors = async (showPrompt = false) => {
     if (isSeedingActive) return;
     isSeedingActive = true;
+    if (showPrompt) setIsLoading(true);
     try {
-      console.log('Seeding 1799 default vendors to cloud...');
-      const vendorsToInsert = initialVendors.map(v => ({
-        vendor_name: v.vendorName,
-        contact_person: v.contactPerson,
-        email: v.email,
-        mobile: v.mobile,
-        address: v.address,
-        website: v.website,
-        rating: v.rating,
-        rating_count: v.ratingCount,
-        brand: v.brand,
-        capacity: v.capacity,
-        install_count: v.installCount,
-        user_id: user.id
-      }));
+      console.log('Seeding/Syncing default vendors from nikunj.json...');
+      const vendorsToInsert = initialVendors.map(v => mapJsonToDbVendor(v, user.id));
 
-      // Insert in chunks of 500 to avoid payload size errors
-      const chunkSize = 500;
-      for (let i = 0; i < vendorsToInsert.length; i += chunkSize) {
-        const chunk = vendorsToInsert.slice(i, i + chunkSize);
-        const { error } = await supabase.from('vendors').insert(chunk);
-        if (error) throw error;
+      const { insertedCount, updatedCount, skippedCount } = await syncVendorsWithDb(vendorsToInsert);
+      
+      console.log('Vendors successfully synchronized/seeded!');
+      if (showPrompt) {
+        alert(`Database synced with local JSON data!\nSync details: ${insertedCount} new vendors added, ${updatedCount} existing vendors updated, and ${skippedCount} unchanged vendors were skipped.`);
       }
-
-      console.log('Vendors successfully seeded!');
-      // Re-fetch now that database is seeded
+      // Re-fetch now that database is seeded/synchronized
       await fetchData();
     } catch (err) {
-      console.error('Failed to seed vendors:', err);
+      console.error('Failed to seed/sync vendors:', err);
+      if (showPrompt) {
+        alert('Failed to sync database with local JSON data.');
+      }
       setIsLoading(false);
     } finally {
       isSeedingActive = false;
+      if (showPrompt) setIsLoading(false);
     }
   };
 
@@ -369,10 +584,11 @@ function App() {
         if (!localVendor) continue;
 
         // Match local vendor to newly loaded cloud database vendor (by name or phone)
-        const dbVendor = dbVendors.find(dv => 
-          dv.vendor_name === localVendor.vendorName ||
-          (localVendor.mobile && dv.mobile === localVendor.mobile)
-        );
+        const dbVendor = dbVendors.find(dv => {
+          const localMobile = localVendor.contactPersonMobile || localVendor.mobile;
+          return dv.vendor_name === (localVendor.vendorName || localVendor.vendor_name) ||
+            (localMobile && dv.contact_person_mobile === localMobile);
+        });
 
         if (!dbVendor) continue;
 
@@ -447,12 +663,15 @@ function App() {
           latestFollowUp = logWithDate.followUpDate;
         }
       }
+      const loc = getVendorLocation(vendor.address);
       return {
         ...vendor,
         status,
         latestFollowUp,
         logs,
-        assignedName: vendor.profiles?.name || vendor.profiles?.email?.split('@')[0] || null
+        assignedName: vendor.profiles?.name || vendor.profiles?.email?.split('@')[0] || null,
+        state: loc.state,
+        district: loc.district
       };
     });
   }, [vendors, callLogs, vendorStatuses]);
@@ -461,12 +680,19 @@ function App() {
   const filteredVendors = useMemo(() => {
     return mergedVendors.filter(vendor => {
       const query = searchQuery.toLowerCase();
+      
+      // Brand matching
+      const brandStr = Array.isArray(vendor.vendor_brands_list) 
+        ? vendor.vendor_brands_list.join(' ').toLowerCase() 
+        : '';
+        
       const matchesSearch = 
         vendor.vendor_name.toLowerCase().includes(query) ||
-        (vendor.contact_person && vendor.contact_person.toLowerCase().includes(query)) ||
-        (vendor.mobile && vendor.mobile.toLowerCase().includes(query)) ||
+        (vendor.contact_person_name && vendor.contact_person_name.toLowerCase().includes(query)) ||
+        (vendor.contact_person_mobile && vendor.contact_person_mobile.toLowerCase().includes(query)) ||
+        (vendor.contact_person_email && vendor.contact_person_email.toLowerCase().includes(query)) ||
         (vendor.address && vendor.address.toLowerCase().includes(query)) ||
-        (vendor.brand && vendor.brand.toLowerCase().includes(query));
+        brandStr.includes(query);
       
       if (!matchesSearch) return false;
 
@@ -477,17 +703,122 @@ function App() {
         if (vendor.rating < minRating) return false;
       }
 
+      if (stateFilter !== 'All' && vendor.state !== stateFilter) return false;
+      if (districtFilter !== 'All' && vendor.district !== districtFilter) return false;
+
       return true;
     });
-  }, [mergedVendors, searchQuery, statusFilter, ratingFilter]);
+  }, [mergedVendors, searchQuery, statusFilter, ratingFilter, stateFilter, districtFilter]);
+
+  // --- Sort ---
+  const sortedVendors = useMemo(() => {
+    const sorted = [...filteredVendors];
+    
+    sorted.sort((a, b) => {
+      let valA = a[sortBy];
+      let valB = b[sortBy];
+
+      // Handle null/undefined
+      if (valA === undefined || valA === null) valA = '';
+      if (valB === undefined || valB === null) valB = '';
+
+      // Perform conversion if numeric
+      if (sortBy.includes('capacity') || sortBy.includes('installs') || sortBy === 'rating' || sortBy === 'consumer_rating_count') {
+        const numA = parseFloat(valA) || 0;
+        const numB = parseFloat(valB) || 0;
+        return sortOrder === 'asc' ? numA - numB : numB - numA;
+      }
+
+      // Default string comparison
+      const strA = String(valA).toLowerCase();
+      const strB = String(valB).toLowerCase();
+      
+      if (strA < strB) return sortOrder === 'asc' ? -1 : 1;
+      if (strA > strB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [filteredVendors, sortBy, sortOrder]);
 
   // Paginated vendors for Directory view
   const paginatedVendors = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredVendors.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredVendors, currentPage]);
+    return sortedVendors.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedVendors, currentPage]);
 
-  const totalPages = Math.ceil(filteredVendors.length / itemsPerPage);
+  const totalPages = Math.ceil(sortedVendors.length / itemsPerPage);
+
+  // --- Location Dropdowns Memos ---
+  const uniqueStates = useMemo(() => {
+    const states = new Set(mergedVendors.map(v => v.state).filter(Boolean));
+    return ['All', ...Array.from(states).sort()];
+  }, [mergedVendors]);
+
+  const uniqueDistricts = useMemo(() => {
+    const filteredForState = stateFilter === 'All' 
+      ? mergedVendors 
+      : mergedVendors.filter(v => v.state === stateFilter);
+    const districts = new Set(filteredForState.map(v => v.district).filter(Boolean));
+    return ['All', ...Array.from(districts).sort()];
+  }, [mergedVendors, stateFilter]);
+
+  const totalFilteredCapacity = useMemo(() => {
+    const key = sortBy.includes('capacity') ? sortBy : 'nationwise_capacity';
+    return sortedVendors.reduce((acc, v) => acc + (parseFloat(v[key]) || 0), 0);
+  }, [sortedVendors, sortBy]);
+
+  // --- Capacity Breakdown Stats for Dashboard ---
+  const capacityStats = useMemo(() => {
+    const stateDataMap = {};
+    mergedVendors.forEach(v => {
+      const state = v.state || 'Unknown';
+      if (!stateDataMap[state]) {
+        stateDataMap[state] = { state, leadsCount: 0, totalCapacity: 0 };
+      }
+      stateDataMap[state].leadsCount++;
+      stateDataMap[state].totalCapacity += parseFloat(v.statewise_capacity) || 0;
+    });
+
+    const stateList = Object.values(stateDataMap);
+
+    const districtDataMap = {};
+    mergedVendors.forEach(v => {
+      const state = v.state || 'Unknown';
+      const district = v.district || 'Other';
+      
+      if (!districtDataMap[state]) {
+        districtDataMap[state] = {};
+      }
+      if (!districtDataMap[state][district]) {
+        districtDataMap[state][district] = { district, leadsCount: 0, totalCapacity: 0 };
+      }
+      districtDataMap[state][district].leadsCount++;
+      districtDataMap[state][district].totalCapacity += parseFloat(v.districtwise_capacity) || 0;
+    });
+
+    return {
+      stateList,
+      districtDataMap
+    };
+  }, [mergedVendors]);
+
+  const sortedDashboardStates = useMemo(() => {
+    return [...capacityStats.stateList].sort((a, b) => {
+      return dashboardStateSortOrder === 'asc' 
+        ? a.totalCapacity - b.totalCapacity 
+        : b.totalCapacity - a.totalCapacity;
+    });
+  }, [capacityStats.stateList, dashboardStateSortOrder]);
+
+  const sortedDashboardDistricts = useMemo(() => {
+    const districtsForState = capacityStats.districtDataMap[dashboardSelectedState] || {};
+    return Object.values(districtsForState).sort((a, b) => {
+      return dashboardDistrictSortOrder === 'asc' 
+        ? a.totalCapacity - b.totalCapacity 
+        : b.totalCapacity - a.totalCapacity;
+    });
+  }, [capacityStats.districtDataMap, dashboardSelectedState, dashboardDistrictSortOrder]);
 
   // --- Stats Computations ---
   const stats = useMemo(() => {
@@ -836,109 +1167,12 @@ function App() {
           return;
         }
 
-        const uploadedVendors = rawRows.map((row) => {
-          // Resolve brand name from nested array
-          let brandName = '';
-          if (row.brand) {
-            brandName = row.brand;
-          } else if (Array.isArray(row.vendorBrandsList) && row.vendorBrandsList.length > 0) {
-            brandName = row.vendorBrandsList[0].brandName || '';
-          }
+        const uploadedVendors = rawRows.map((row) => mapJsonToDbVendor(row, user.id));
 
-          // Resolve installation capacity
-          let installedCapacity = 0;
-          if (row.capacity) {
-            installedCapacity = parseFloat(row.capacity) || 0;
-          } else if (row.statewiseInstallationAndCapacity) {
-            installedCapacity = parseFloat(row.statewiseInstallationAndCapacity.installedCapacity) || 0;
-          } else if (row.nationwiseInstallationAndCapacity) {
-            installedCapacity = parseFloat(row.nationwiseInstallationAndCapacity.installedCapacity) || 0;
-          }
+        // Sync uploaded vendors with database using name-based de-duplication
+        const { insertedCount, updatedCount, skippedCount } = await syncVendorsWithDb(uploadedVendors);
 
-          // Resolve installation count
-          let installationCount = 0;
-          if (row.install_count) {
-            installationCount = parseInt(row.install_count) || 0;
-          } else if (row.installCount) {
-            installationCount = parseInt(row.installCount) || 0;
-          } else if (row.statewiseInstallationAndCapacity) {
-            installationCount = parseInt(row.statewiseInstallationAndCapacity.installationCount) || 0;
-          } else if (row.nationwiseInstallationAndCapacity) {
-            installationCount = parseInt(row.nationwiseInstallationAndCapacity.installationCount) || 0;
-          }
-
-          return {
-            vendor_name: row.vendorName || row.vendor_name || row.companyName || 'Unknown Vendor',
-            contact_person: row.contactPersonName || row.contact_person || row.contactPerson || '',
-            email: row.contactPersonEmail || row.email || '',
-            mobile: row.contactPersonMobile || row.mobile || row.phone ? String(row.contactPersonMobile || row.mobile || row.phone).trim() : '',
-            address: row.address || '',
-            website: row.websiteUrl || row.website || '',
-            rating: parseFloat(row.rating) || 0,
-            rating_count: parseInt(row.consumerRatingCount || row.rating_count || row.ratingCount) || 0,
-            brand: brandName,
-            capacity: installedCapacity,
-            install_count: installationCount,
-            user_id: user.id
-          };
-        });
-
-        const actionChoice = window.prompt(`Parsed ${uploadedVendors.length} vendors.\n\nType "replace" to wipe your database and import, or "append" to add these vendors to your list. Leave blank to cancel:`, "append");
-        
-        if (!actionChoice) {
-          alert("Import cancelled.");
-          return;
-        }
-
-        const action = actionChoice.trim().toLowerCase();
-        if (action !== 'replace' && action !== 'append') {
-          alert("Invalid choice. Import cancelled.");
-          return;
-        }
-
-        let vendorsToInsert = uploadedVendors;
-        let skippedCount = 0;
-
-        if (action === 'replace') {
-          const doubleCheck = window.confirm("WARNING: Wiping the database will delete ALL existing vendors and ALL of your call history. Are you absolutely sure?");
-          if (!doubleCheck) return;
-
-          const { error: dError } = await supabase.from('vendors').delete().eq('user_id', user.id);
-          if (dError) throw dError;
-        } else if (action === 'append') {
-          // De-duplicate: check if vendor name already exists in database
-          const existingNames = new Set(
-            vendors.map(v => v.vendor_name.trim().toLowerCase())
-          );
-
-          vendorsToInsert = uploadedVendors.filter(uv => {
-            const nameKey = uv.vendor_name.trim().toLowerCase();
-            if (existingNames.has(nameKey)) {
-              skippedCount++;
-              return false;
-            }
-            return true;
-          });
-
-          if (vendorsToInsert.length === 0) {
-            alert('All uploaded vendors already exist in your database! No new vendors were added.');
-            return;
-          }
-        }
-
-        // Bulk insert in chunks of 500
-        const chunkSize = 500;
-        for (let i = 0; i < vendorsToInsert.length; i += chunkSize) {
-          const chunk = vendorsToInsert.slice(i, i + chunkSize);
-          const { error: iError } = await supabase.from('vendors').insert(chunk);
-          if (iError) throw iError;
-        }
-
-        if (action === 'replace') {
-          alert('Online database replaced successfully!');
-        } else {
-          alert(`Import complete! ${vendorsToInsert.length} vendors added to your database. ${skippedCount} duplicate vendors were skipped.`);
-        }
+        alert(`Import complete!\nSync details: ${insertedCount} new vendors added, ${updatedCount} existing vendors updated, and ${skippedCount} unchanged vendors were skipped.`);
 
         setCurrentPage(1);
         await fetchData();
@@ -1290,10 +1524,10 @@ function App() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           <span style={{ fontWeight: '700', fontSize: '1rem' }}>{vendor.vendor_name}</span>
                           <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
-                            📞 {vendor.contact_person} ({vendor.mobile})
-                            {vendor.mobile && (
+                            📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
+                            {vendor.contact_person_mobile && (
                               <a 
-                                href={getWhatsAppUrl(vendor.mobile)} 
+                                href={getWhatsAppUrl(vendor.contact_person_mobile)} 
                                 target="_blank" 
                                 rel="noopener noreferrer" 
                                 title="Send WhatsApp Message"
@@ -1378,6 +1612,101 @@ function App() {
 
             </div>
 
+            {/* Location & Capacity Analytics Section */}
+            <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '15px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Activity size={20} style={{ color: 'var(--accent-cyan)' }} /> Solar Capacity Analytics
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                    Real-time aggregated installation capacity breakdown at National, State, and District levels.
+                  </p>
+                </div>
+                <div style={{ padding: '8px 16px', borderRadius: '10px', background: 'rgba(6, 182, 212, 0.06)', border: '1px solid rgba(6, 182, 212, 0.15)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>National Capacity: </span>
+                  <strong style={{ fontSize: '1.05rem', color: 'var(--accent-cyan)' }}>
+                    {mergedVendors.reduce((acc, v) => acc + (parseFloat(v.nationwise_capacity) || 0), 0).toLocaleString()} kW
+                  </strong>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '24px' }}>
+                
+                {/* State-wise Breakdown */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h4 style={{ fontSize: '1rem', fontWeight: '700', margin: 0 }}>State-wise Capacity</h4>
+                    <button 
+                      onClick={() => setDashboardStateSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                      className="btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      Sort: {dashboardStateSortOrder === 'desc' ? 'High to Low (↓)' : 'Low to High (↑)'}
+                    </button>
+                  </div>
+                  
+                  <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto', paddingRight: '6px' }}>
+                    {sortedDashboardStates.map(item => (
+                      <div key={item.state} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>{item.state}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.leadsCount} leads</span>
+                        </div>
+                        <span style={{ fontWeight: '700', color: 'var(--accent-cyan)' }}>{item.totalCapacity.toLocaleString()} kW</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* District-wise Breakdown */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <h4 style={{ fontSize: '1rem', fontWeight: '700', margin: 0 }}>District-wise (</h4>
+                      <select 
+                        value={dashboardSelectedState}
+                        onChange={(e) => setDashboardSelectedState(e.target.value)}
+                        className="input-field"
+                        style={{ padding: '2px 8px', fontSize: '0.75rem', width: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border-glass)', height: '24px', cursor: 'pointer', fontWeight: '600', color: 'var(--accent-cyan)' }}
+                      >
+                        {capacityStats.stateList.map(item => (
+                          <option key={item.state} value={item.state}>{item.state}</option>
+                        ))}
+                      </select>
+                      <h4 style={{ fontSize: '1rem', fontWeight: '700', margin: 0 }}>)</h4>
+                    </div>
+                    <button 
+                      onClick={() => setDashboardDistrictSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                      className="btn-secondary"
+                      style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      Sort: {dashboardDistrictSortOrder === 'desc' ? 'High to Low (↓)' : 'Low to High (↑)'}
+                    </button>
+                  </div>
+                  
+                  <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto', paddingRight: '6px' }}>
+                    {sortedDashboardDistricts.length === 0 ? (
+                      <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                        No districts found for this state.
+                      </div>
+                    ) : (
+                      sortedDashboardDistricts.map(item => (
+                        <div key={item.district} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>{item.district}</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.leadsCount} leads</span>
+                          </div>
+                          <span style={{ fontWeight: '700', color: 'var(--accent-cyan)' }}>{item.totalCapacity.toLocaleString()} kW</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </section>
+
           </div>
         )}
 
@@ -1387,26 +1716,29 @@ function App() {
             
             {/* Filters & Search Card */}
             <section className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <div className="filter-grid">
-                <div style={{ position: 'relative' }}>
-                  <Search size={16} style={{ position: 'absolute', left: '14px', top: '14px', color: 'var(--text-muted)' }} />
-                  <input 
-                    type="text" 
-                    value={searchQuery}
-                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    placeholder="Search by Company Name, Contact Person, Brand, Phone, Address..." 
-                    className="input-field"
-                    style={{ paddingLeft: '40px' }}
-                  />
-                  {searchQuery && (
-                    <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: '14px', top: '14px', color: 'var(--text-muted)' }}>
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
+              
+              {/* Row 1: Search Bar */}
+              <div style={{ position: 'relative', width: '100%' }}>
+                <Search size={16} style={{ position: 'absolute', left: '14px', top: '14px', color: 'var(--text-muted)' }} />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                  placeholder="Search by Company Name, Contact Person, Brand, Phone, Address..." 
+                  className="input-field"
+                  style={{ paddingLeft: '40px', width: '100%' }}
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: '14px', top: '14px', color: 'var(--text-muted)' }}>
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
 
+              {/* Row 2: Location and Status Filters */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Filter size={16} style={{ color: 'var(--accent-cyan)' }} />
+                  <Filter size={16} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
                   <select 
                     value={statusFilter} 
                     onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
@@ -1422,7 +1754,7 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Star size={16} style={{ color: 'var(--accent-cyan)' }} />
+                  <Star size={16} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
                   <select 
                     value={ratingFilter} 
                     onChange={(e) => { setRatingFilter(e.target.value); setCurrentPage(1); }}
@@ -1436,11 +1768,106 @@ function App() {
                     <option value="3.0">3.0★ & Above</option>
                   </select>
                 </div>
+
+                {/* State Filter */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <MapPin size={16} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
+                  <select 
+                    value={stateFilter} 
+                    onChange={(e) => { 
+                      setStateFilter(e.target.value); 
+                      setDistrictFilter('All');
+                      setCurrentPage(1); 
+                    }}
+                    className="input-field"
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {uniqueStates.map(state => (
+                      <option key={state} value={state}>
+                        {state === 'All' ? 'All States (Nation-wise)' : state}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* District Filter */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <MapPin size={16} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
+                  <select 
+                    value={districtFilter} 
+                    disabled={uniqueDistricts.length <= 1}
+                    onChange={(e) => { setDistrictFilter(e.target.value); setCurrentPage(1); }}
+                    className="input-field"
+                    style={{ cursor: uniqueDistricts.length <= 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    {uniqueDistricts.map(dist => (
+                      <option key={dist} value={dist}>
+                        {dist === 'All' ? 'All Districts' : dist}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
-                <span>Found <strong>{filteredVendors.length}</strong> matching solar vendors</span>
-                <span>Page {currentPage} of {totalPages || 1}</span>
+              {/* Row 3: Sorting Controls */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', borderTop: '1px solid var(--border-glass)', paddingTop: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Sort Vendors By:</span>
+                  
+                  <select 
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="input-field"
+                    style={{ cursor: 'pointer', padding: '4px 12px', fontSize: '0.85rem', width: 'auto', height: '32px' }}
+                  >
+                    <option value="nationwise_capacity">Nation-wise Capacity (kW)</option>
+                    <option value="statewise_capacity">State-wide Capacity (kW)</option>
+                    <option value="districtwise_capacity">District-wide Capacity (kW)</option>
+                    <option value="nationwise_installs">Nation-wise Installs</option>
+                    <option value="statewise_installs">State-wide Installs</option>
+                    <option value="districtwise_installs">District-wide Installs</option>
+                    <option value="rating">Rating</option>
+                    <option value="consumer_rating_count">Rating Count</option>
+                    <option value="vendor_name">Company Name</option>
+                  </select>
+
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button 
+                      onClick={() => setSortOrder('desc')}
+                      className="btn-secondary"
+                      style={{ 
+                        padding: '6px 12px', 
+                        fontSize: '0.8rem', 
+                        borderRadius: '6px',
+                        background: sortOrder === 'desc' ? 'var(--accent-cyan)' : 'transparent',
+                        borderColor: sortOrder === 'desc' ? 'var(--accent-cyan)' : 'var(--border-glass)',
+                        color: sortOrder === 'desc' ? 'black' : 'var(--text-primary)',
+                        fontWeight: sortOrder === 'desc' ? '700' : 'normal'
+                      }}
+                    >
+                      High to Low (↓)
+                    </button>
+                    <button 
+                      onClick={() => setSortOrder('asc')}
+                      className="btn-secondary"
+                      style={{ 
+                        padding: '6px 12px', 
+                        fontSize: '0.8rem', 
+                        borderRadius: '6px',
+                        background: sortOrder === 'asc' ? 'var(--accent-cyan)' : 'transparent',
+                        borderColor: sortOrder === 'asc' ? 'var(--accent-cyan)' : 'var(--border-glass)',
+                        color: sortOrder === 'asc' ? 'black' : 'var(--text-primary)',
+                        fontWeight: sortOrder === 'asc' ? '700' : 'normal'
+                      }}
+                    >
+                      Low to High (↑)
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Found <strong>{filteredVendors.length}</strong> matching leads | Total Capacity: <strong>{totalFilteredCapacity.toLocaleString()} kW</strong> (Page {currentPage}/{totalPages || 1})
+                </div>
               </div>
             </section>
 
@@ -1477,7 +1904,7 @@ function App() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.85rem', color: '#fbbf24', fontWeight: '600' }}>
                           <Star size={13} fill="#fbbf24" stroke="none" />
                           <span>{(parseFloat(vendor.rating) || 0).toFixed(1)}</span>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 'normal' }}>({vendor.rating_count || 0})</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 'normal' }}>({vendor.consumer_rating_count || 0})</span>
                         </div>
                       </div>
 
@@ -1486,11 +1913,11 @@ function App() {
                       </h3>
 
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                        {vendor.brand && (
-                          <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500' }}>
-                            {vendor.brand}
+                        {vendor.vendor_brands_list && vendor.vendor_brands_list.slice(0, 2).map((br, index) => (
+                          <span key={index} style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500' }}>
+                            {br}
                           </span>
-                        )}
+                        ))}
                         {vendor.assignedName && (
                           <span style={{ fontSize: '0.75rem', color: 'var(--accent-pink)', background: 'rgba(236, 72, 153, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500' }} title={`Assigned to ${vendor.assignedName}`}>
                             👤 {vendor.assignedName}
@@ -1501,15 +1928,15 @@ function App() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Users size={12} style={{ color: 'var(--text-muted)' }} />
-                          <span>Contact: <strong>{vendor.contact_person || 'Not Listed'}</strong></span>
+                          <span>Contact: <strong>{vendor.contact_person_name || 'Not Listed'}</strong></span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Phone size={12} style={{ color: 'var(--text-muted)' }} />
                           <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                            Phone: <strong style={{ marginLeft: '4px' }}>{vendor.mobile || 'Not Listed'}</strong>
-                            {vendor.mobile && (
+                            Phone: <strong style={{ marginLeft: '4px' }}>{vendor.contact_person_mobile || 'Not Listed'}</strong>
+                            {vendor.contact_person_mobile && (
                               <a 
-                                href={getWhatsAppUrl(vendor.mobile)} 
+                                href={getWhatsAppUrl(vendor.contact_person_mobile)} 
                                 target="_blank" 
                                 rel="noopener noreferrer" 
                                 title="Send WhatsApp Message"
@@ -1523,6 +1950,22 @@ function App() {
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
                           <MapPin size={12} style={{ color: 'var(--text-muted)', marginTop: '2px' }} />
                           <span className="text-truncate" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{vendor.address}</span>
+                        </div>
+                      </div>
+
+                      {/* Capacities Section */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px dashed var(--border-glass)', paddingTop: '10px', marginTop: '10px', fontSize: '0.75rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>🌎 Nation Capacity:</span>
+                          <span style={{ color: 'var(--accent-cyan)', fontWeight: '600' }}>{vendor.nationwise_capacity?.toLocaleString() || 0} kW ({vendor.nationwise_installs || 0} inst)</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>🏛️ State Capacity:</span>
+                          <span style={{ color: 'var(--accent-cyan)', fontWeight: '600' }}>{vendor.statewise_capacity?.toLocaleString() || 0} kW ({vendor.statewise_installs || 0} inst)</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>📍 District Capacity:</span>
+                          <span style={{ color: 'var(--accent-cyan)', fontWeight: '600' }}>{vendor.districtwise_capacity?.toLocaleString() || 0} kW ({vendor.districtwise_installs || 0} inst)</span>
                         </div>
                       </div>
                     </div>
@@ -1711,10 +2154,10 @@ function App() {
                       </div>
                       
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center' }}>
-                        📞 {vendor.contact_person} ({vendor.mobile})
-                        {vendor.mobile && (
+                        📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
+                        {vendor.contact_person_mobile && (
                           <a 
-                            href={getWhatsAppUrl(vendor.mobile)} 
+                            href={getWhatsAppUrl(vendor.contact_person_mobile)} 
                             target="_blank" 
                             rel="noopener noreferrer" 
                             title="Send WhatsApp Message"
@@ -1792,7 +2235,16 @@ function App() {
                         style={{ display: 'none' }} 
                       />
                     </label>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports JSON array of vendors (vendorName, contactPerson, mobile, etc.)</span>
+                    
+                    <button 
+                      onClick={() => seedDefaultVendors(true)}
+                      className="btn-primary" 
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '10px' }}
+                    >
+                      <RefreshCw size={16} /> Sync Local JSON Data
+                    </button>
+                    
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Syncs the database with your uploaded nikunj.json file.</span>
                   </div>
                 </div>
 
@@ -2052,17 +2504,17 @@ function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '0.85rem', color: '#fbbf24', fontWeight: '600' }}>
                   <Star size={13} fill="#fbbf24" stroke="none" />
                   <span>{(parseFloat(selectedVendor.rating) || 0).toFixed(1)}</span>
-                  <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({selectedVendor.rating_count || 0})</span>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({selectedVendor.consumer_rating_count || 0})</span>
                 </div>
               </div>
 
               <h2 style={{ fontSize: '1.4rem', fontWeight: '800', paddingRight: '30px' }}>{selectedVendor.vendor_name}</h2>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
-                {selectedVendor.brand && (
-                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' }}>
-                    Brand: {selectedVendor.brand}
+                {selectedVendor.vendor_brands_list && selectedVendor.vendor_brands_list.map((br, index) => (
+                  <span key={index} style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' }}>
+                    {br}
                   </span>
-                )}
+                ))}
                 {selectedVendor.assignedName && (
                   <span style={{ fontSize: '0.8rem', color: 'var(--accent-pink)', background: 'rgba(236, 72, 153, 0.08)', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' }}>
                     👤 Assigned to: {selectedVendor.assignedName}
@@ -2076,14 +2528,14 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Contact Person</span>
-                  <p style={{ fontWeight: '600' }}>{selectedVendor.contact_person || 'Not Listed'}</p>
+                  <p style={{ fontWeight: '600' }}>{selectedVendor.contact_person_name || 'Not Listed'}</p>
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Mobile Number</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
                     <a 
-                      href={selectedVendor.mobile ? `tel:${selectedVendor.mobile}` : '#'} 
-                      onClick={(e) => !selectedVendor.mobile && e.preventDefault()}
+                      href={selectedVendor.contact_person_mobile ? `tel:${selectedVendor.contact_person_mobile}` : '#'} 
+                      onClick={(e) => !selectedVendor.contact_person_mobile && e.preventDefault()}
                       style={{ 
                         display: 'inline-flex', 
                         alignItems: 'center', 
@@ -2099,11 +2551,11 @@ function App() {
                       }}
                     >
                       <Phone size={12} style={{ color: 'var(--accent-cyan)' }} />
-                      <span>{selectedVendor.mobile || 'Not Listed'}</span>
+                      <span>{selectedVendor.contact_person_mobile || 'Not Listed'}</span>
                     </a>
-                    {selectedVendor.mobile && (
+                    {selectedVendor.contact_person_mobile && (
                       <a 
-                        href={getWhatsAppUrl(selectedVendor.mobile)} 
+                        href={getWhatsAppUrl(selectedVendor.contact_person_mobile)} 
                         target="_blank" 
                         rel="noopener noreferrer" 
                         title="Send WhatsApp Message"
@@ -2131,25 +2583,34 @@ function App() {
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Email Address</span>
-                  <p style={{ fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden' }}>{selectedVendor.email || 'Not Listed'}</p>
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div>
-                  <span style={{ color: 'var(--text-muted)' }}>Installed Capacity (Gujarat)</span>
-                  <p style={{ fontWeight: '600' }}>{selectedVendor.capacity ? `${selectedVendor.capacity} kW` : 'Not Listed'} ({selectedVendor.install_count || 0} installs)</p>
+                  <p style={{ fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden' }}>{selectedVendor.contact_person_email || 'Not Listed'}</p>
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Website URL</span>
                   <p style={{ fontWeight: '600' }}>
-                    {selectedVendor.website ? (
-                      <a href={selectedVendor.website.startsWith('http') ? selectedVendor.website : `https://${selectedVendor.website}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                        {selectedVendor.website} <Globe size={11} />
+                    {selectedVendor.website_url ? (
+                      <a href={selectedVendor.website_url.startsWith('http') ? selectedVendor.website_url : `https://${selectedVendor.website_url}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                        {selectedVendor.website_url} <Globe size={11} />
                       </a>
                     ) : (
                       'Not Listed'
                     )}
                   </p>
+                </div>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>🌎 Nation-wise Capacity</span>
+                  <p style={{ fontWeight: '600' }}>{selectedVendor.nationwise_capacity?.toLocaleString() || 0} kW ({selectedVendor.nationwise_installs || 0} installs)</p>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>🏛️ State-wide Capacity</span>
+                  <p style={{ fontWeight: '600' }}>{selectedVendor.statewise_capacity?.toLocaleString() || 0} kW ({selectedVendor.statewise_installs || 0} installs)</p>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>📍 District-wide Capacity</span>
+                  <p style={{ fontWeight: '600' }}>{selectedVendor.districtwise_capacity?.toLocaleString() || 0} kW ({selectedVendor.districtwise_installs || 0} installs)</p>
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Address</span>

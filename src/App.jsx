@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import initialVendors from './data/vendors.json';
 import { parseFollowUpDate } from './utils/dateParser.js';
-import { supabase } from './supabaseClient.js';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient.js';
+import { createClient } from '@supabase/supabase-js';
 import { 
   Sun, 
   Phone, 
@@ -98,18 +99,76 @@ function App() {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null); // 'YYYY-MM-DD'
 
+  // --- Multi-User & Admin States ---
+  const [userRole, setUserRole] = useState('user'); // 'admin' | 'user'
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState('user'); // 'admin' | 'user'
+  const [followUpFilter, setFollowUpFilter] = useState('All'); // 'All' | 'Mine'
+
+  // --- Profile Management & Role Checking ---
+  const upsertProfile = async (sessionUser) => {
+    try {
+      const { data: profile, error: selectError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', sessionUser.id)
+        .maybeSingle();
+
+      if (selectError) throw selectError;
+
+      const defaultRole = sessionUser.email.toLowerCase() === 'vedant@vijapur.in' ? 'admin' : 'user';
+      const name = sessionUser.user_metadata?.name || sessionUser.email.split('@')[0];
+      let currentRole = defaultRole;
+
+      if (!profile) {
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: sessionUser.id,
+            email: sessionUser.email,
+            name: name,
+            role: defaultRole
+          });
+        if (insertError) throw insertError;
+      } else {
+        currentRole = profile.role;
+        // Keep profile in sync
+        if (profile.name !== name || profile.email !== sessionUser.email) {
+          await supabase
+            .from('profiles')
+            .update({ email: sessionUser.email, name: name })
+            .eq('id', sessionUser.id);
+        }
+      }
+
+      setUserRole(currentRole);
+    } catch (err) {
+      console.error('Error in upsertProfile:', err);
+    }
+  };
+
   // --- Auth Initialization ---
   useEffect(() => {
-    // Get session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
       setIsAuthenticated(!!session);
+      if (u) {
+        upsertProfile(u);
+      }
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
       setIsAuthenticated(!!session);
+      if (u) {
+        upsertProfile(u);
+      } else {
+        setUserRole('user');
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -131,7 +190,7 @@ function App() {
     }
   }, [user, fetchedUserId]);
 
-  const fetchAllFromTable = async (tableName, orderByField, ascending = true) => {
+  const fetchAllFromTable = async (tableName, selectQuery, orderByField, ascending = true) => {
     let allData = [];
     let hasMore = true;
     let page = 0;
@@ -140,8 +199,7 @@ function App() {
     while (hasMore) {
       const { data: chunk, error } = await supabase
         .from(tableName)
-        .select('*')
-        .eq('user_id', user.id)
+        .select(selectQuery)
         .range(page * pageSize, (page + 1) * pageSize - 1)
         .order(orderByField, { ascending });
 
@@ -164,8 +222,8 @@ function App() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // 1. Fetch all Vendors (handling Supabase 1000 rows limit)
-      const dbVendors = await fetchAllFromTable('vendors', 'id', true);
+      // 1. Fetch all Vendors with assigned profile
+      const dbVendors = await fetchAllFromTable('vendors', '*, profiles:assigned_to(name, email, role)', 'id', true);
 
       // Auto-Seed default vendors if 0 vendors found in database
       if (dbVendors.length === 0) {
@@ -175,8 +233,8 @@ function App() {
 
       setVendors(dbVendors);
 
-      // 2. Fetch all Call Logs (handling Supabase 1000 rows limit)
-      const dbLogs = await fetchAllFromTable('call_logs', 'timestamp', false);
+      // 2. Fetch all Call Logs with user profiles
+      const dbLogs = await fetchAllFromTable('call_logs', '*, profiles:user_id(name, email, role)', 'timestamp', false);
 
       // Compile logs into Map: { [vendorId]: [logs] } and extract latest status
       const logsMap = {};
@@ -191,7 +249,9 @@ function App() {
           timestamp: log.timestamp,
           outcome: log.outcome,
           note: log.note,
-          followUpDate: log.follow_up_date
+          followUpDate: log.follow_up_date,
+          user_id: log.user_id,
+          userName: log.profiles?.name || log.profiles?.email?.split('@')[0] || 'Unknown User'
         });
 
         // The logs are ordered descending, so the first match we encounter is the latest status
@@ -370,7 +430,8 @@ function App() {
         ...vendor,
         status,
         latestFollowUp,
-        logs
+        logs,
+        assignedName: vendor.profiles?.name || vendor.profiles?.email?.split('@')[0] || null
       };
     });
   }, [vendors, callLogs, vendorStatuses]);
@@ -450,6 +511,13 @@ function App() {
     return mergedVendors.filter(v => v.latestFollowUp === todayStr);
   }, [mergedVendors]);
 
+  const filteredTodayFollowUps = useMemo(() => {
+    if (followUpFilter === 'Mine' && user) {
+      return todayFollowUpVendors.filter(v => v.assigned_to === user.id);
+    }
+    return todayFollowUpVendors;
+  }, [todayFollowUpVendors, followUpFilter, user]);
+
   // --- Calendar Computations ---
   const calendarDays = useMemo(() => {
     const year = calendarDate.getFullYear();
@@ -518,6 +586,13 @@ function App() {
     return calendarFollowUpMap[selectedCalendarDay] || [];
   }, [selectedCalendarDay, calendarFollowUpMap]);
 
+  const filteredSelectedDayVendors = useMemo(() => {
+    if (followUpFilter === 'Mine' && user) {
+      return selectedDayVendors.filter(v => v.assigned_to === user.id);
+    }
+    return selectedDayVendors;
+  }, [selectedDayVendors, followUpFilter, user]);
+
   // --- Auth Handlers ---
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -548,6 +623,63 @@ function App() {
     }
   };
 
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword) {
+      alert('Please fill out all fields.');
+      return;
+    }
+    if (newUserPassword.length < 6) {
+      alert('Password must be at least 6 characters.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const tempSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false
+        }
+      });
+
+      const { data, error } = await tempSupabase.auth.signUp({
+        email: newUserEmail.trim().toLowerCase(),
+        password: newUserPassword,
+        options: {
+          data: {
+            name: newUserName.trim()
+          }
+        }
+      });
+
+      if (error) throw error;
+      if (!data.user) throw new Error('User creation returned empty data.');
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: data.user.id,
+          email: newUserEmail.trim().toLowerCase(),
+          name: newUserName.trim(),
+          role: newUserRole
+        });
+
+      if (profileError) throw profileError;
+
+      alert(`User account successfully created for ${newUserName.trim()} (${newUserRole})!`);
+      
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserRole('user');
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to create user account: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // --- CRM Interaction Handlers ---
   const handleOpenCallModal = (vendor) => {
     setSelectedVendor(vendor);
@@ -574,6 +706,14 @@ function App() {
         .select();
 
       if (error) throw error;
+
+      // Update vendor lead to be assigned to the current user
+      const { error: vError } = await supabase
+        .from('vendors')
+        .update({ assigned_to: user.id })
+        .eq('id', selectedVendor.id);
+
+      if (vError) throw vError;
 
       // Close Modal and reset
       setSelectedVendor(null);
@@ -1065,15 +1205,26 @@ function App() {
               
               {/* Left Column: Today's Follow-up list */}
               <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '400px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <CheckCircle style={{ color: 'var(--accent-cyan)' }} size={20} />
-                    <h3 style={{ fontSize: '1.2rem' }}>Scheduled Follow-Ups for Today</h3>
+                    <h3 style={{ fontSize: '1.2rem', margin: 0 }}>Scheduled Follow-Ups for Today</h3>
                   </div>
-                  <span className="badge badge-callback" style={{ fontSize: '0.7rem' }}>{todayFollowUpVendors.length} PENDING</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <select
+                      value={followUpFilter}
+                      onChange={(e) => setFollowUpFilter(e.target.value)}
+                      className="input-field"
+                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border-glass)', height: '28px', cursor: 'pointer' }}
+                    >
+                      <option value="All">All Follow-ups</option>
+                      <option value="Mine">My Follow-ups</option>
+                    </select>
+                    <span className="badge badge-callback" style={{ fontSize: '0.7rem' }}>{filteredTodayFollowUps.length} PENDING</span>
+                  </div>
                 </div>
 
-                {todayFollowUpVendors.length === 0 ? (
+                {filteredTodayFollowUps.length === 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)', gap: '10px', padding: '40px 0' }}>
                     <Check style={{ width: '48px', height: '48px', color: 'var(--status-interested)', opacity: 0.6 }} />
                     <p>No follow-ups scheduled for today. Awesome!</p>
@@ -1081,7 +1232,7 @@ function App() {
                   </div>
                 ) : (
                   <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '420px', overflowY: 'auto', paddingRight: '6px' }}>
-                    {todayFollowUpVendors.map(vendor => (
+                    {filteredTodayFollowUps.map(vendor => (
                       <div key={vendor.id} className="follow-up-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           <span style={{ fontWeight: '700', fontSize: '1rem' }}>{vendor.vendor_name}</span>
@@ -1281,11 +1432,18 @@ function App() {
                         {vendor.vendor_name}
                       </h3>
 
-                      {vendor.brand && (
-                        <span style={{ display: 'inline-block', fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '2px 8px', borderRadius: '4px', marginBottom: '10px', fontWeight: '500' }}>
-                          {vendor.brand}
-                        </span>
-                      )}
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                        {vendor.brand && (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500' }}>
+                            {vendor.brand}
+                          </span>
+                        )}
+                        {vendor.assignedName && (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--accent-pink)', background: 'rgba(236, 72, 153, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500' }} title={`Assigned to ${vendor.assignedName}`}>
+                            👤 {vendor.assignedName}
+                          </span>
+                        )}
+                      </div>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1456,16 +1614,29 @@ function App() {
 
             {/* Day details Panel */}
             <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <div style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px' }}>
-                <h3 style={{ fontSize: '1.1rem' }}>
-                  {selectedCalendarDay ? (
-                    `Follow-Ups for ${new Date(selectedCalendarDay).toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })}`
-                  ) : (
-                    "Select a Calendar Day"
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.1rem', margin: 0 }}>
+                    {selectedCalendarDay ? (
+                      `Follow-Ups for ${new Date(selectedCalendarDay).toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                    ) : (
+                      "Select a Calendar Day"
+                    )}
+                  </h3>
+                  {selectedCalendarDay === getTodayString() && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--accent-pink)', fontWeight: '600', display: 'block', marginTop: '2px' }}>TODAY'S SCHEDULE</span>
                   )}
-                </h3>
-                {selectedCalendarDay === getTodayString() && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--accent-pink)', fontWeight: '600' }}>TODAY'S SCHEDULE</span>
+                </div>
+                {selectedCalendarDay && (
+                  <select
+                    value={followUpFilter}
+                    onChange={(e) => setFollowUpFilter(e.target.value)}
+                    className="input-field"
+                    style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border-glass)', height: '28px', cursor: 'pointer' }}
+                  >
+                    <option value="All">All Follow-ups</option>
+                    <option value="Mine">My Follow-ups</option>
+                  </select>
                 )}
               </div>
 
@@ -1473,13 +1644,13 @@ function App() {
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', padding: '40px 0' }}>
                   <p>Click any day on the calendar to view scheduled follow-up actions.</p>
                 </div>
-              ) : selectedDayVendors.length === 0 ? (
+              ) : filteredSelectedDayVendors.length === 0 ? (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', padding: '40px 0' }}>
                   <p>No follow-ups scheduled for this day.</p>
                 </div>
               ) : (
                 <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', maxHeight: '450px' }}>
-                  {selectedDayVendors.map(vendor => (
+                  {filteredSelectedDayVendors.map(vendor => (
                     <div key={vendor.id} style={{ padding: '14px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-glass)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <span style={{ fontWeight: '700', fontSize: '0.95rem', color: 'var(--text-primary)' }}>{vendor.vendor_name}</span>
@@ -1614,6 +1785,82 @@ function App() {
               </div>
             </div>
 
+            {/* Admin-only User Creation Card */}
+            {(userRole === 'admin' || (user && user.email?.toLowerCase() === 'vedant@vijapur.in')) && (
+              <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', gridColumn: 'span 2' }}>
+                <div style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px' }}>
+                  <h3 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users style={{ color: 'var(--accent-pink)' }} /> Create User Account
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Register a new team member. They will be added to your Supabase Auth list and public profiles.</p>
+                </div>
+
+                <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>Full Name</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={newUserName}
+                      onChange={(e) => setNewUserName(e.target.value)}
+                      placeholder="John Doe"
+                      className="input-field"
+                      style={{ fontSize: '0.85rem' }}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>Email Address</label>
+                    <input 
+                      type="email" 
+                      required
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="input-field"
+                      style={{ fontSize: '0.85rem' }}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>Password</label>
+                    <input 
+                      type="password" 
+                      required
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="input-field"
+                      style={{ fontSize: '0.85rem' }}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>User Role / Type</label>
+                    <select
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value)}
+                      className="input-field"
+                      style={{ fontSize: '0.85rem', cursor: 'pointer' }}
+                      disabled={isLoading}
+                    >
+                      <option value="user">Standard User</option>
+                      <option value="admin">Admin User</option>
+                    </select>
+                  </div>
+
+                  <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                    <button type="submit" disabled={isLoading} className="btn-primary" style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '0.85rem' }}>
+                      {isLoading ? <Loader2 size={16} className="animate-spin" /> : 'Create Account'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
           </div>
         )}
 
@@ -1647,11 +1894,18 @@ function App() {
               </div>
 
               <h2 style={{ fontSize: '1.4rem', fontWeight: '800', paddingRight: '30px' }}>{selectedVendor.vendor_name}</h2>
-              {selectedVendor.brand && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '3px 8px', borderRadius: '4px', marginTop: '6px', display: 'inline-block', fontWeight: '500' }}>
-                  Brand: {selectedVendor.brand}
-                </span>
-              )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                {selectedVendor.brand && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' }}>
+                    Brand: {selectedVendor.brand}
+                  </span>
+                )}
+                {selectedVendor.assignedName && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-pink)', background: 'rgba(236, 72, 153, 0.08)', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' }}>
+                    👤 Assigned to: {selectedVendor.assignedName}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Two Column details */}
@@ -1820,11 +2074,16 @@ function App() {
                   {selectedVendor.logs.map((log, index) => (
                     <div key={log.id || index} style={{ padding: '10px', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '0.8rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                           <span className={`badge badge-${log.outcome.toLowerCase()}`} style={{ fontSize: '0.6rem', padding: '2px 6px' }}>{log.outcome}</span>
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
                             {new Date(log.timestamp).toLocaleString('default', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                           </span>
+                          {log.userName && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.08)', padding: '1px 5px', borderRadius: '3px', fontWeight: '500' }}>
+                              By: {log.userName}
+                            </span>
+                          )}
                         </div>
                         <p style={{ color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.3' }}>"{log.note}"</p>
                         {log.followUpDate && (

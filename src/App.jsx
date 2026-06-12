@@ -106,6 +106,9 @@ function App() {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState('user'); // 'admin' | 'user'
   const [followUpFilter, setFollowUpFilter] = useState('All'); // 'All' | 'Mine'
+  const [usersList, setUsersList] = useState([]);
+  const [editingUser, setEditingUser] = useState(null);
+  const [newUserPasswordInput, setNewUserPasswordInput] = useState('');
 
   // --- Profile Management & Role Checking ---
   const upsertProfile = async (sessionUser) => {
@@ -144,8 +147,24 @@ function App() {
       }
 
       setUserRole(currentRole);
+      if (currentRole === 'admin' || sessionUser.email.toLowerCase() === 'vedant@vijapur.in') {
+        fetchUsersList();
+      }
     } catch (err) {
       console.error('Error in upsertProfile:', err);
+    }
+  };
+
+  const fetchUsersList = async () => {
+    try {
+      const { data: dbUsers, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setUsersList(dbUsers || []);
+    } catch (err) {
+      console.error('Error fetching users:', err);
     }
   };
 
@@ -262,6 +281,10 @@ function App() {
 
       setCallLogs(logsMap);
       setVendorStatuses(statusesMap);
+
+      if (userRole === 'admin' || user?.email?.toLowerCase() === 'vedant@vijapur.in') {
+        await fetchUsersList();
+      }
 
       // 3. Trigger Zero Data Loss Migration (Upload localStorage items if any)
       await migrateLocalStorageData(dbVendors);
@@ -672,9 +695,41 @@ function App() {
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserRole('user');
+
+      await fetchUsersList();
     } catch (err) {
       console.error(err);
       alert(`Failed to create user account: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdminChangePassword = async (e) => {
+    e.preventDefault();
+    if (!editingUser || !newUserPasswordInput) {
+      alert('Please fill out the new password.');
+      return;
+    }
+    if (newUserPasswordInput.length < 6) {
+      alert('Password must be at least 6 characters.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.rpc('admin_change_user_password', {
+        user_uuid: editingUser.id,
+        new_password: newUserPasswordInput
+      });
+
+      if (error) throw error;
+
+      alert(`Password successfully updated for ${editingUser.name}!`);
+      setEditingUser(null);
+      setNewUserPasswordInput('');
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to update password: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -1858,6 +1913,116 @@ function App() {
                     </button>
                   </div>
                 </form>
+              </div>
+            )}
+
+            {/* Admin-only User Directory & Settings Card */}
+            {(userRole === 'admin' || (user && user.email?.toLowerCase() === 'vedant@vijapur.in')) && (
+              <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', gridColumn: 'span 2', marginTop: '10px' }}>
+                <div style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px' }}>
+                  <h3 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users style={{ color: 'var(--accent-cyan)' }} /> User Directory & Account Settings
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>View all active user profiles and update password credentials directly.</p>
+                </div>
+
+                {/* Users List Table */}
+                <div className="scroll-container" style={{ overflowX: 'auto', border: '1px solid var(--border-glass)', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.01)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(255, 255, 255, 0.02)', borderBottom: '1px solid var(--border-glass)' }}>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-primary)' }}>Name</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-primary)' }}>Email</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-primary)' }}>Role</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-primary)', textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersList.map((usr) => (
+                        <tr key={usr.id} style={{ borderBottom: '1px solid var(--border-glass)' }}>
+                          <td style={{ padding: '12px 16px', fontWeight: '600' }}>{usr.name}</td>
+                          <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>{usr.email}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span 
+                              className={`badge badge-${usr.role === 'admin' ? 'callback' : 'interested'}`}
+                              style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase' }}
+                            >
+                              {usr.role}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                            <button
+                              onClick={() => {
+                                setEditingUser(usr);
+                                setNewUserPasswordInput('');
+                              }}
+                              className="btn-secondary"
+                              style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px' }}
+                            >
+                              Reset Password
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Inline Password Change Modal overlay */}
+                {editingUser && (
+                  <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0, 0, 0, 0.65)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1001, backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+                    <div className="glass-panel animate-fade-in" style={{ width: '90%', maxWidth: '400px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative' }}>
+                      <button 
+                        onClick={() => setEditingUser(null)}
+                        style={{ position: 'absolute', right: '16px', top: '16px', background: 'rgba(255,255,255,0.05)', padding: '6px', borderRadius: '50%', color: 'var(--text-secondary)' }}
+                      >
+                        <X size={16} />
+                      </button>
+
+                      <div>
+                        <h3 style={{ fontSize: '1.1rem', fontWeight: '700' }}>Reset Password</h3>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Set a new password for <strong>{editingUser.name}</strong> ({editingUser.email})</p>
+                      </div>
+
+                      <form onSubmit={handleAdminChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>New Password</label>
+                          <input 
+                            type="password" 
+                            required
+                            value={newUserPasswordInput}
+                            onChange={(e) => setNewUserPasswordInput(e.target.value)}
+                            placeholder="Min 6 characters"
+                            className="input-field"
+                            style={{ fontSize: '0.85rem' }}
+                            disabled={isLoading}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '5px' }}>
+                          <button 
+                            type="button" 
+                            onClick={() => setEditingUser(null)} 
+                            className="btn-secondary" 
+                            style={{ padding: '8px 14px', fontSize: '0.8rem' }}
+                            disabled={isLoading}
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            type="submit" 
+                            className="btn-primary" 
+                            style={{ padding: '8px 16px', fontSize: '0.8rem' }}
+                            disabled={isLoading}
+                          >
+                            {isLoading ? <Loader2 size={14} className="animate-spin" /> : 'Save Password'}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
 

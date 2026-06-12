@@ -31,7 +31,8 @@ import {
   LogOut,
   Lock,
   Loader2,
-  Menu
+  Menu,
+  TrendingUp
 } from 'lucide-react';
 
 // Storage keys for migration fallback
@@ -138,6 +139,12 @@ function App() {
   const [vendors, setVendors] = useState([]);
   const [callLogs, setCallLogs] = useState({});
   const [vendorStatuses, setVendorStatuses] = useState({});
+  const [snapshots, setSnapshots] = useState([]);
+  const [availableDates, setAvailableDates] = useState([]);
+  
+  // --- Growth Tracker Comparison Range ---
+  const [growthStartDate, setGrowthStartDate] = useState('');
+  const [growthEndDate, setGrowthEndDate] = useState('');
   
   // --- UI Interactions ---
   const [selectedVendor, setSelectedVendor] = useState(null);
@@ -366,11 +373,28 @@ function App() {
       setCallLogs(logsMap);
       setVendorStatuses(statusesMap);
 
+      // 4. Fetch all Vendor Snapshots
+      const dbSnapshots = await fetchAllFromTable('vendor_snapshots', '*', 'snapshot_date', false);
+      setSnapshots(dbSnapshots);
+
+      // Extract unique snapshot dates (ordered descending by default)
+      const uniqueDates = [...new Set(dbSnapshots.map(s => s.snapshot_date))];
+      setAvailableDates(uniqueDates);
+
+      // Default Comparison Date Range (earliest as start, latest as end)
+      if (uniqueDates.length >= 2) {
+        setGrowthStartDate(uniqueDates[uniqueDates.length - 1]);
+        setGrowthEndDate(uniqueDates[0]);
+      } else if (uniqueDates.length === 1) {
+        setGrowthStartDate(uniqueDates[0]);
+        setGrowthEndDate(uniqueDates[0]);
+      }
+
       if (userRole === 'admin' || user?.email?.toLowerCase() === 'vedant@vijapur.in') {
         await fetchUsersList();
       }
 
-      // 4. Trigger Zero Data Loss Migration (Upload localStorage items if any)
+      // 5. Trigger Zero Data Loss Migration (Upload localStorage items if any)
       await migrateLocalStorageData(dbVendors);
 
     } catch (err) {
@@ -566,6 +590,64 @@ function App() {
       }
     }
 
+    // 3. Record vendor capacity snapshots for today
+    let allUpdatedVendors = [];
+    let refetchPage = 0;
+    let refetchHasMore = true;
+    const refetchPageSize = 1000;
+    
+    while (refetchHasMore) {
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('*')
+        .range(refetchPage * refetchPageSize, (refetchPage + 1) * refetchPageSize - 1)
+        .order('id', { ascending: true });
+        
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        allUpdatedVendors = [...allUpdatedVendors, ...data];
+        refetchPage++;
+        if (data.length < refetchPageSize) {
+          refetchHasMore = false;
+        }
+      } else {
+        refetchHasMore = false;
+      }
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const snapshotRecords = [];
+    
+    uniqueIncoming.forEach(uv => {
+      const dbVendor = allUpdatedVendors.find(v => 
+        cleanStr(v.vendor_name).toLowerCase() === cleanStr(uv.vendor_name).toLowerCase()
+      );
+      if (dbVendor) {
+        snapshotRecords.push({
+          vendor_id: dbVendor.id,
+          snapshot_date: todayStr,
+          nationwise_capacity: uv.nationwise_capacity,
+          nationwise_installs: uv.nationwise_installs,
+          statewise_capacity: uv.statewise_capacity,
+          statewise_installs: uv.statewise_installs,
+          districtwise_capacity: uv.districtwise_capacity,
+          districtwise_installs: uv.districtwise_installs
+        });
+      }
+    });
+
+    if (snapshotRecords.length > 0) {
+      const chunkSize = 200;
+      for (let i = 0; i < snapshotRecords.length; i += chunkSize) {
+        const chunk = snapshotRecords.slice(i, i + chunkSize);
+        const { error: snapshotError } = await supabase
+          .from('vendor_snapshots')
+          .upsert(chunk);
+        if (snapshotError) throw snapshotError;
+      }
+    }
+
     return { insertedCount, updatedCount, skippedCount };
   };
 
@@ -580,7 +662,55 @@ function App() {
 
       const { insertedCount, updatedCount, skippedCount } = await syncVendorsWithDb(vendorsToInsert);
       
-      console.log('Vendors successfully synchronized/seeded!');
+      console.log('Vendors successfully synchronized/seeded! Creating mock historical snapshots...');
+      
+      // Generate mock historical snapshots dated 15 days ago at 90% capacity/installs
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 15);
+      const pastDateStr = pastDate.toISOString().split('T')[0];
+
+      let allVendorsForMock = [];
+      let mockPage = 0;
+      let mockHasMore = true;
+      const mockPageSize = 1000;
+      while (mockHasMore) {
+        const { data, error } = await supabase
+          .from('vendors')
+          .select('*')
+          .range(mockPage * mockPageSize, (mockPage + 1) * mockPageSize - 1);
+        if (error) throw error;
+        if (data && data.length > 0) {
+          allVendorsForMock = [...allVendorsForMock, ...data];
+          mockPage++;
+          if (data.length < mockPageSize) mockHasMore = false;
+        } else {
+          mockHasMore = false;
+        }
+      }
+
+      const mockSnapshots = allVendorsForMock.map(v => ({
+        vendor_id: v.id,
+        snapshot_date: pastDateStr,
+        nationwise_capacity: Math.round((parseFloat(v.nationwise_capacity || 0) * 0.9) * 100) / 100,
+        nationwise_installs: Math.max(0, Math.round(parseInt(v.nationwise_installs || 0) * 0.9)),
+        statewise_capacity: Math.round((parseFloat(v.statewise_capacity || 0) * 0.9) * 100) / 100,
+        statewise_installs: Math.max(0, Math.round(parseInt(v.statewise_installs || 0) * 0.9)),
+        districtwise_capacity: Math.round((parseFloat(v.districtwise_capacity || 0) * 0.9) * 100) / 100,
+        districtwise_installs: Math.max(0, Math.round(parseInt(v.districtwise_installs || 0) * 0.9))
+      }));
+
+      if (mockSnapshots.length > 0) {
+        const chunkSize = 200;
+        for (let i = 0; i < mockSnapshots.length; i += chunkSize) {
+          const chunk = mockSnapshots.slice(i, i + chunkSize);
+          const { error: mockError } = await supabase
+            .from('vendor_snapshots')
+            .upsert(chunk);
+          if (mockError) throw mockError;
+        }
+      }
+
+      console.log('Mock historical snapshots successfully created!');
       if (showPrompt) {
         alert(`Database synced with local JSON data!\nSync details: ${insertedCount} new vendors added, ${updatedCount} existing vendors updated, and ${skippedCount} unchanged vendors were skipped.`);
       }
@@ -893,6 +1023,151 @@ function App() {
     const todayStr = getTodayString();
     return mergedVendors.filter(v => v.latestFollowUp === todayStr);
   }, [mergedVendors]);
+
+  // Growth & sync snapshots comparison analytics
+  const growthComparison = useMemo(() => {
+    if (!growthStartDate || !growthEndDate || snapshots.length === 0) {
+      return null;
+    }
+
+    const cleanStr = (s) => (s === null || s === undefined ? '' : String(s).trim());
+
+    // Filter snapshots for start date and end date
+    const startSnapshots = snapshots.filter(s => s.snapshot_date === growthStartDate);
+    const endSnapshots = snapshots.filter(s => s.snapshot_date === growthEndDate);
+
+    // Create maps: vendor_id -> snapshot
+    const startMap = {};
+    startSnapshots.forEach(s => {
+      startMap[s.vendor_id] = s;
+    });
+
+    const endMap = {};
+    endSnapshots.forEach(s => {
+      endMap[s.vendor_id] = s;
+    });
+
+    let totalStartInstalls = 0;
+    let totalStartCapacity = 0;
+    let totalEndInstalls = 0;
+    let totalEndCapacity = 0;
+
+    let totalStateStartCapacity = 0;
+    let totalStateStartInstalls = 0;
+    let totalStateEndCapacity = 0;
+    let totalStateEndInstalls = 0;
+
+    let totalDistrictStartCapacity = 0;
+    let totalDistrictStartInstalls = 0;
+    let totalDistrictEndCapacity = 0;
+    let totalDistrictEndInstalls = 0;
+
+    const vendorGrowthList = [];
+
+    // Loop through all vendors
+    vendors.forEach(v => {
+      const startSnap = startMap[v.id];
+      const endSnap = endMap[v.id];
+
+      // If either snapshot exists, we track it
+      if (startSnap || endSnap) {
+        const startNationwiseCap = startSnap ? parseFloat(startSnap.nationwise_capacity || 0) : 0;
+        const startNationwiseInst = startSnap ? parseInt(startSnap.nationwise_installs || 0) : 0;
+        const startStatewiseCap = startSnap ? parseFloat(startSnap.statewise_capacity || 0) : 0;
+        const startStatewiseInst = startSnap ? parseInt(startSnap.statewise_installs || 0) : 0;
+        const startDistrictwiseCap = startSnap ? parseFloat(startSnap.districtwise_capacity || 0) : 0;
+        const startDistrictwiseInst = startSnap ? parseInt(startSnap.districtwise_installs || 0) : 0;
+
+        const endNationwiseCap = endSnap ? parseFloat(endSnap.nationwise_capacity || 0) : 0;
+        const endNationwiseInst = endSnap ? parseInt(endSnap.nationwise_installs || 0) : 0;
+        const endStatewiseCap = endSnap ? parseFloat(endSnap.statewise_capacity || 0) : 0;
+        const endStatewiseInst = endSnap ? parseInt(endSnap.statewise_installs || 0) : 0;
+        const endDistrictwiseCap = endSnap ? parseFloat(endSnap.districtwise_capacity || 0) : 0;
+        const endDistrictwiseInst = endSnap ? parseInt(endSnap.districtwise_installs || 0) : 0;
+
+        totalStartInstalls += startNationwiseInst;
+        totalStartCapacity += startNationwiseCap;
+        totalEndInstalls += endNationwiseInst;
+        totalEndCapacity += endNationwiseCap;
+
+        totalStateStartCapacity += startStatewiseCap;
+        totalStateStartInstalls += startStatewiseInst;
+        totalStateEndCapacity += endStatewiseCap;
+        totalStateEndInstalls += endStatewiseInst;
+
+        totalDistrictStartCapacity += startDistrictwiseCap;
+        totalDistrictStartInstalls += startDistrictwiseInst;
+        totalDistrictEndCapacity += endDistrictwiseCap;
+        totalDistrictEndInstalls += endDistrictwiseInst;
+
+        const capDiff = endNationwiseCap - startNationwiseCap;
+        const instDiff = endNationwiseInst - startNationwiseInst;
+
+        const stateCapDiff = endStatewiseCap - startStatewiseCap;
+        const stateInstDiff = endStatewiseInst - startStatewiseInst;
+
+        const districtCapDiff = endDistrictwiseCap - startDistrictwiseCap;
+        const districtInstDiff = endDistrictwiseInst - startDistrictwiseInst;
+
+        if (capDiff !== 0 || instDiff !== 0 || stateCapDiff !== 0 || stateInstDiff !== 0 || districtCapDiff !== 0 || districtInstDiff !== 0) {
+          vendorGrowthList.push({
+            id: v.id,
+            vendor_name: v.vendor_name,
+            address: v.address,
+            startCapacity: startNationwiseCap,
+            startInstalls: startNationwiseInst,
+            endCapacity: endNationwiseCap,
+            endInstalls: endNationwiseInst,
+            capDiff,
+            instDiff,
+            stateCapDiff,
+            stateInstDiff,
+            districtCapDiff,
+            districtInstDiff
+          });
+        }
+      }
+    });
+
+    // Sort growth list by installation diff descending, then capacity diff descending
+    vendorGrowthList.sort((a, b) => b.instDiff - a.instDiff || b.capDiff - a.capDiff);
+
+    return {
+      nationwise: {
+        startCapacity: totalStartCapacity,
+        startInstalls: totalStartInstalls,
+        endCapacity: totalEndCapacity,
+        endInstalls: totalEndInstalls,
+        capacityGrowth: totalEndCapacity - totalStartCapacity,
+        installGrowth: totalEndInstalls - totalStartInstalls
+      },
+      statewise: {
+        startCapacity: totalStateStartCapacity,
+        startInstalls: totalStateStartInstalls,
+        endCapacity: totalStateEndCapacity,
+        endInstalls: totalStateEndInstalls,
+        capacityGrowth: totalStateEndCapacity - totalStateStartCapacity,
+        installGrowth: totalStateEndInstalls - totalStateStartInstalls
+      },
+      districtwise: {
+        startCapacity: totalDistrictStartCapacity,
+        startInstalls: totalDistrictStartInstalls,
+        endCapacity: totalDistrictEndCapacity,
+        endInstalls: totalDistrictEndInstalls,
+        capacityGrowth: totalDistrictEndCapacity - totalDistrictStartCapacity,
+        installGrowth: totalDistrictEndInstalls - totalDistrictStartInstalls
+      },
+      vendorsGrowth: vendorGrowthList
+    };
+  }, [growthStartDate, growthEndDate, snapshots, vendors]);
+
+  // Snapshots for selected vendor to show history timeline
+  const selectedVendorSnapshots = useMemo(() => {
+    if (!selectedVendor || snapshots.length === 0) return [];
+    return snapshots
+      .filter(s => s.vendor_id === selectedVendor.id)
+      .sort((a, b) => new Date(b.snapshot_date) - new Date(a.snapshot_date));
+  }, [selectedVendor, snapshots]);
 
   const filteredTodayFollowUps = useMemo(() => {
     if (followUpFilter === 'Mine' && user) {
@@ -1736,6 +2011,168 @@ function App() {
                 </div>
 
               </div>
+            </section>
+
+            {/* Sync Growth & Installation Tracker */}
+            <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '15px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <TrendingUp size={20} style={{ color: 'var(--status-interested)' }} /> Sync Comparison & Growth Tracker
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                    Compare installations and solar capacities between any two upload/sync dates.
+                  </p>
+                </div>
+
+                {/* Date Selection Dropdowns */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>From:</span>
+                    <select
+                      value={growthStartDate}
+                      onChange={(e) => setGrowthStartDate(e.target.value)}
+                      className="input-field"
+                      style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)', height: '32px', cursor: 'pointer', color: 'var(--text-primary)' }}
+                    >
+                      {availableDates.map(d => (
+                        <option key={`start-${d}`} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>To:</span>
+                    <select
+                      value={growthEndDate}
+                      onChange={(e) => setGrowthEndDate(e.target.value)}
+                      className="input-field"
+                      style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)', height: '32px', cursor: 'pointer', color: 'var(--text-primary)' }}
+                    >
+                      {availableDates.map(d => (
+                        <option key={`end-${d}`} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {availableDates.length < 2 ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.01)', borderRadius: '12px', border: '1px dashed var(--border-glass)' }}>
+                  <TrendingUp size={36} style={{ marginBottom: '10px', opacity: 0.5, color: 'var(--text-muted)' }} />
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-secondary)' }}>No Historical Sync Data Found</h4>
+                  <p style={{ margin: 0, fontSize: '0.8rem' }}>
+                    Seeding local JSON data or uploading new JSON updates will automatically record snapshots. Upload multiple updates to track capacity growth over time.
+                  </p>
+                </div>
+              ) : !growthComparison ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Please select valid Start and End dates to calculate growth.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  
+                  {/* Growth Summary Cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+                    
+                    <div style={{ padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%)', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>National Capacity Growth</span>
+                      <strong style={{ fontSize: '1.4rem', color: '#10b981', display: 'block' }}>
+                        +{growthComparison.nationwise.capacityGrowth.toLocaleString()} kW
+                      </strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Capacity went from {growthComparison.nationwise.startCapacity.toLocaleString()} kW to {growthComparison.nationwise.endCapacity.toLocaleString()} kW
+                      </span>
+                    </div>
+
+                    <div style={{ padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(6, 182, 212, 0.02) 100%)', border: '1px solid rgba(6, 182, 212, 0.15)' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>New Installations Added</span>
+                      <strong style={{ fontSize: '1.4rem', color: 'var(--accent-cyan)', display: 'block' }}>
+                        +{growthComparison.nationwise.installGrowth} installs
+                      </strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Installations went from {growthComparison.nationwise.startInstalls} to {growthComparison.nationwise.endInstalls}
+                      </span>
+                    </div>
+
+                    <div style={{ padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.08) 0%, rgba(236, 72, 153, 0.02) 100%)', border: '1px solid rgba(236, 72, 153, 0.15)' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Active Growing Vendors</span>
+                      <strong style={{ fontSize: '1.4rem', color: 'var(--accent-pink)', display: 'block' }}>
+                        {growthComparison.vendorsGrowth.filter(vg => vg.instDiff > 0 || vg.capDiff > 0).length} vendors
+                      </strong>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Vendors recorded increases in installation metrics
+                      </span>
+                    </div>
+
+                  </div>
+
+                  {/* Growth Breakdown Tables */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '24px' }}>
+                    
+                    {/* Vendors Growth Table */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h4 style={{ fontSize: '1rem', fontWeight: '700', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        🏢 Top Growing Vendors
+                      </h4>
+                      
+                      <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto', paddingRight: '6px' }}>
+                        {growthComparison.vendorsGrowth.length === 0 ? (
+                          <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                            No vendor records changed between these two dates.
+                          </div>
+                        ) : (
+                          growthComparison.vendorsGrowth.map(item => (
+                            <div key={`growth-${item.id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '65%' }}>
+                                <span style={{ fontWeight: '700', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {item.vendor_name}
+                                </span>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  {item.address ? item.address.split(',').slice(-2).join(',').trim() : 'No Address'}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#10b981' }}>
+                                  +{item.capDiff.toLocaleString()} kW
+                                </span>
+                                <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.1)', color: 'var(--accent-cyan)', fontWeight: '600' }}>
+                                  +{item.instDiff} installs
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Regional Performance Metrics */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h4 style={{ fontSize: '1rem', fontWeight: '700', margin: 0 }}>
+                        📍 Regional Growth Contribution
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '20px', background: 'rgba(255, 255, 255, 0.01)', borderRadius: '12px', border: '1px solid var(--border-glass)', justifyContent: 'center', flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>State-wide Capacity Growth:</span>
+                          <strong style={{ fontSize: '0.9rem', color: 'var(--accent-cyan)' }}>
+                            +{growthComparison.statewise.capacityGrowth.toLocaleString()} kW (+{growthComparison.statewise.installGrowth} installs)
+                          </strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>District-wide Capacity Growth:</span>
+                          <strong style={{ fontSize: '0.9rem', color: 'var(--accent-cyan)' }}>
+                            +{growthComparison.districtwise.capacityGrowth.toLocaleString()} kW (+{growthComparison.districtwise.installGrowth} installs)
+                          </strong>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4', marginTop: '10px' }}>
+                          💡 **Tip**: When you upload weekly updates, this section displays which state-registered and district-registered solar installers contributed the most capacity increase.
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                </div>
+              )}
             </section>
 
           </div>
@@ -2758,6 +3195,56 @@ function App() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Vendor Snapshot History */}
+            <div style={{ marginTop: '10px' }}>
+              <h3 style={{ fontSize: '1.05rem', marginBottom: '8px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <TrendingUp size={16} style={{ color: 'var(--status-interested)' }} /> Capacity & Installation History
+              </h3>
+              {selectedVendorSnapshots.length === 0 ? (
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>No historical capacity snapshots recorded for this supplier.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {selectedVendorSnapshots.map((snap, index) => {
+                    // Calculate difference from previous snapshot if exists
+                    const prevSnap = selectedVendorSnapshots[index + 1];
+                    const capDiff = prevSnap ? snap.nationwise_capacity - prevSnap.nationwise_capacity : 0;
+                    const instDiff = prevSnap ? snap.nationwise_installs - prevSnap.nationwise_installs : 0;
+
+                    return (
+                      <div key={snap.id || index} style={{ padding: '10px 14px', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>
+                            Sync Date: {snap.snapshot_date}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            🌎 Nation: {snap.nationwise_capacity?.toLocaleString()} kW ({snap.nationwise_installs} installs)
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            🏛️ State: {snap.statewise_capacity?.toLocaleString()} kW | 📍 Dist: {snap.districtwise_capacity?.toLocaleString()} kW
+                          </span>
+                        </div>
+                        
+                        {prevSnap && (capDiff > 0 || instDiff > 0) && (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                            {capDiff > 0 && (
+                              <span style={{ color: '#10b981', fontWeight: '700' }}>
+                                +{capDiff.toLocaleString()} kW
+                              </span>
+                            )}
+                            {instDiff > 0 && (
+                              <span style={{ fontSize: '0.7rem', padding: '1px 5px', borderRadius: '3px', background: 'rgba(6, 182, 212, 0.08)', color: 'var(--accent-cyan)', fontWeight: '600' }}>
+                                +{instDiff} installs
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

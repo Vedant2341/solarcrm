@@ -643,7 +643,7 @@ function App() {
         const chunk = snapshotRecords.slice(i, i + chunkSize);
         const { error: snapshotError } = await supabase
           .from('vendor_snapshots')
-          .upsert(chunk);
+          .upsert(chunk, { onConflict: 'vendor_id,snapshot_date' });
         if (snapshotError) throw snapshotError;
       }
     }
@@ -705,7 +705,7 @@ function App() {
           const chunk = mockSnapshots.slice(i, i + chunkSize);
           const { error: mockError } = await supabase
             .from('vendor_snapshots')
-            .upsert(chunk);
+            .upsert(chunk, { onConflict: 'vendor_id,snapshot_date' });
           if (mockError) throw mockError;
         }
       }

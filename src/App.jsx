@@ -1636,9 +1636,6 @@ function App() {
             </button>
           </form>
 
-          <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            <span>Connects directly to your Supabase Cloud Database.</span>
-          </div>
 
         </div>
       </div>

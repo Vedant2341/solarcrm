@@ -655,7 +655,7 @@ function App() {
       if (error) throw error;
       if (!data.user) throw new Error('User creation returned empty data.');
 
-      const { error: profileError } = await supabase
+      const { error: profileError } = await tempSupabase
         .from('profiles')
         .upsert({
           id: data.user.id,

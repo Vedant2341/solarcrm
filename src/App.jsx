@@ -241,8 +241,15 @@ function App() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // 1. Fetch all Vendors with assigned profile
-      const dbVendors = await fetchAllFromTable('vendors', '*, profiles:assigned_to(name, email, role)', 'id', true);
+      // 1. Fetch all User Profiles
+      const dbProfiles = await fetchAllFromTable('profiles', '*', 'id', true);
+      const profilesMap = {};
+      dbProfiles.forEach(p => {
+        profilesMap[p.id] = p;
+      });
+
+      // 2. Fetch all Vendors
+      const dbVendors = await fetchAllFromTable('vendors', '*', 'id', true);
 
       // Auto-Seed default vendors if 0 vendors found in database
       if (dbVendors.length === 0) {
@@ -250,10 +257,18 @@ function App() {
         return; // seedDefaultVendors will re-trigger fetchData when done
       }
 
-      setVendors(dbVendors);
+      // Map profiles to vendors in memory
+      const vendorsWithProfiles = dbVendors.map(vendor => {
+        const profile = vendor.assigned_to ? profilesMap[vendor.assigned_to] : null;
+        return {
+          ...vendor,
+          profiles: profile
+        };
+      });
+      setVendors(vendorsWithProfiles);
 
-      // 2. Fetch all Call Logs with user profiles
-      const dbLogs = await fetchAllFromTable('call_logs', '*, profiles:user_id(name, email, role)', 'timestamp', false);
+      // 3. Fetch all Call Logs
+      const dbLogs = await fetchAllFromTable('call_logs', '*', 'timestamp', false);
 
       // Compile logs into Map: { [vendorId]: [logs] } and extract latest status
       const logsMap = {};
@@ -263,6 +278,7 @@ function App() {
         if (!logsMap[log.vendor_id]) {
           logsMap[log.vendor_id] = [];
         }
+        const logProfile = log.user_id ? profilesMap[log.user_id] : null;
         logsMap[log.vendor_id].push({
           id: log.id,
           timestamp: log.timestamp,
@@ -270,7 +286,7 @@ function App() {
           note: log.note,
           followUpDate: log.follow_up_date,
           user_id: log.user_id,
-          userName: log.profiles?.name || log.profiles?.email?.split('@')[0] || 'Unknown User'
+          userName: logProfile?.name || logProfile?.email?.split('@')[0] || 'Unknown User'
         });
 
         // The logs are ordered descending, so the first match we encounter is the latest status
@@ -286,7 +302,7 @@ function App() {
         await fetchUsersList();
       }
 
-      // 3. Trigger Zero Data Loss Migration (Upload localStorage items if any)
+      // 4. Trigger Zero Data Loss Migration (Upload localStorage items if any)
       await migrateLocalStorageData(dbVendors);
 
     } catch (err) {
@@ -384,26 +400,8 @@ function App() {
       localStorage.removeItem(LOGS_STORAGE_KEY);
       localStorage.removeItem(STATUS_STORAGE_KEY);
 
-      // Re-fetch logs list using the loop helper to ensure all logs load
-      const dbLogs = await fetchAllFromTable('call_logs', 'timestamp', false);
-
-      const logsMap = {};
-      const statusesMap = {};
-
-      dbLogs.forEach(log => {
-        if (!logsMap[log.vendor_id]) logsMap[log.vendor_id] = [];
-        logsMap[log.vendor_id].push({
-          id: log.id,
-          timestamp: log.timestamp,
-          outcome: log.outcome,
-          note: log.note,
-          followUpDate: log.follow_up_date
-        });
-        if (!statusesMap[log.vendor_id]) statusesMap[log.vendor_id] = log.outcome;
-      });
-
-      setCallLogs(logsMap);
-      setVendorStatuses(statusesMap);
+      // Re-fetch all data to load profiles, vendors, and call logs correctly in memory
+      await fetchData();
       alert(`Data Sync Complete: Successfully uploaded ${logsToMigrate.length} local call logs to your cloud account!`);
 
     } catch (err) {

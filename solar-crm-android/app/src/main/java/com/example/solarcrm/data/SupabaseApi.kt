@@ -20,6 +20,7 @@ object SupabaseApi {
 
     data class Session(
         val accessToken: String,
+        val refreshToken: String,
         val userId: String,
         val email: String,
         var name: String = "",
@@ -97,12 +98,14 @@ object SupabaseApi {
         )
         val json = JSONObject(responseStr)
         val accessToken = json.getString("access_token")
+        val refreshToken = json.getString("refresh_token")
         val userJson = json.getJSONObject("user")
         val userId = userJson.getString("id")
         val userEmail = userJson.getString("email")
 
         val session = Session(
             accessToken = accessToken,
+            refreshToken = refreshToken,
             userId = userId,
             email = userEmail
         )
@@ -238,5 +241,51 @@ object SupabaseApi {
             Log.e(TAG, "Error updating vendor assignee", e)
             false
         }
+    }
+
+    suspend fun refreshSession(refreshToken: String): Session = withContext(Dispatchers.IO) {
+        val bodyObj = JSONObject().apply {
+            put("refresh_token", refreshToken)
+        }
+        val responseStr = request(
+            method = "POST",
+            path = "/auth/v1/token?grant_type=refresh_token",
+            body = bodyObj.toString()
+        )
+        val json = JSONObject(responseStr)
+        val accessToken = json.getString("access_token")
+        val newRefreshToken = json.getString("refresh_token")
+        val userJson = json.getJSONObject("user")
+        val userId = userJson.getString("id")
+        val userEmail = userJson.getString("email")
+
+        val session = Session(
+            accessToken = accessToken,
+            refreshToken = newRefreshToken,
+            userId = userId,
+            email = userEmail
+        )
+
+        try {
+            val profileStr = request(
+                method = "GET",
+                path = "/rest/v1/profiles?id=eq.$userId&select=*",
+                authToken = accessToken
+            )
+            val profileArray = JSONArray(profileStr)
+            if (profileArray.length() > 0) {
+                val p = profileArray.getJSONObject(0)
+                session.name = p.optString("name", userEmail.substringBefore("@"))
+                session.role = p.optString("role", "user")
+            } else {
+                session.name = userEmail.substringBefore("@")
+                session.role = if (userEmail.lowercase() == "vedant@vijapur.in") "admin" else "user"
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resolving profile in refreshSession", e)
+            session.name = userEmail.substringBefore("@")
+            session.role = if (userEmail.lowercase() == "vedant@vijapur.in") "admin" else "user"
+        }
+        session
     }
 }

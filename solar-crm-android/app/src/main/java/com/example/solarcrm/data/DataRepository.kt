@@ -68,6 +68,7 @@ sealed interface AuthState {
     object LoggingIn : AuthState
     data class LoggedIn(
         val accessToken: String,
+        val refreshToken: String,
         val userId: String,
         val email: String,
         val name: String,
@@ -176,14 +177,35 @@ class DefaultDataRepository(context: Context) : DataRepository {
     init {
         // Restore session from cache if exists
         val token = prefs.getString("access_token", null)
+        val refreshToken = prefs.getString("refresh_token", null)
         val userId = prefs.getString("user_id", null)
         val email = prefs.getString("email", null)
         val name = prefs.getString("name", null)
         val role = prefs.getString("role", null)
 
-        if (token != null && userId != null && email != null && name != null && role != null) {
-            _authState.value = AuthState.LoggedIn(token, userId, email, name, role)
+        if (token != null && refreshToken != null && userId != null && email != null && name != null && role != null) {
+            _authState.value = AuthState.LoggedIn(token, refreshToken, userId, email, name, role)
         }
+    }
+
+    private fun saveSession(session: SupabaseApi.Session) {
+        prefs.edit().apply {
+            putString("access_token", session.accessToken)
+            putString("refresh_token", session.refreshToken)
+            putString("user_id", session.userId)
+            putString("email", session.email)
+            putString("name", session.name)
+            putString("role", session.role)
+            apply()
+        }
+        _authState.value = AuthState.LoggedIn(
+            accessToken = session.accessToken,
+            refreshToken = session.refreshToken,
+            userId = session.userId,
+            email = session.email,
+            name = session.name,
+            role = session.role
+        )
     }
 
     override suspend fun login(email: String, password: String) = withContext(Dispatchers.IO) {
@@ -191,21 +213,7 @@ class DefaultDataRepository(context: Context) : DataRepository {
         _error.value = null
         try {
             val session = SupabaseApi.login(email, password)
-            prefs.edit().apply {
-                putString("access_token", session.accessToken)
-                putString("user_id", session.userId)
-                putString("email", session.email)
-                putString("name", session.name)
-                putString("role", session.role)
-                apply()
-            }
-            _authState.value = AuthState.LoggedIn(
-                accessToken = session.accessToken,
-                userId = session.userId,
-                email = session.email,
-                name = session.name,
-                role = session.role
-            )
+            saveSession(session)
             Log.d(TAG, "Login successful, fetching initial data...")
             fetchData()
         } catch (e: Exception) {
@@ -236,124 +244,144 @@ class DefaultDataRepository(context: Context) : DataRepository {
         _error.value = null
 
         try {
-            val token = currentAuth.accessToken
-
-            // 1. Fetch profiles
-            val profilesArr = SupabaseApi.fetchProfiles(token)
-            val tempProfiles = ArrayList<Profile>()
-            val profilesMap = HashMap<String, Profile>()
-            for (i in 0 until profilesArr.length()) {
-                val pObj = profilesArr.getJSONObject(i)
-                val p = Profile(
-                    id = pObj.getString("id"),
-                    email = pObj.getString("email"),
-                    name = pObj.optString("name", pObj.getString("email").substringBefore("@")),
-                    role = pObj.optString("role", "user")
-                )
-                tempProfiles.add(p)
-                profilesMap[p.id] = p
-            }
-            _profiles.value = tempProfiles
-
-            // 2. Fetch call logs
-            val logsArr = SupabaseApi.fetchCallLogs(token)
-            val tempLogsMap = HashMap<Int, MutableList<CallLog>>()
-            for (i in 0 until logsArr.length()) {
-                val lObj = logsArr.getJSONObject(i)
-                val vendorId = lObj.getInt("vendor_id")
-                val userId = lObj.getString("user_id")
-                val profile = profilesMap[userId]
-                val userName = profile?.name ?: userId.substringBefore("-")
-
-                val logEntry = CallLog(
-                    id = lObj.getString("id"),
-                    vendorId = vendorId,
-                    timestamp = lObj.optString("timestamp", ""),
-                    outcome = lObj.getString("outcome"),
-                    note = lObj.optString("note", ""),
-                    followUpDate = if (lObj.isNull("follow_up_date")) null else lObj.optString("follow_up_date", null),
-                    userId = userId,
-                    userName = userName
-                )
-                if (!tempLogsMap.containsKey(vendorId)) {
-                    tempLogsMap[vendorId] = ArrayList()
+            doFetch(currentAuth.accessToken)
+        } catch (e: SupabaseApi.ApiException) {
+            if (e.statusCode == 401) {
+                Log.d(TAG, "Access token expired, attempting refresh...")
+                try {
+                    val newSession = SupabaseApi.refreshSession(currentAuth.refreshToken)
+                    saveSession(newSession)
+                    doFetch(newSession.accessToken)
+                } catch (refreshEx: Exception) {
+                    Log.e(TAG, "Failed to refresh token", refreshEx)
+                    logout()
                 }
-                tempLogsMap[vendorId]?.add(logEntry)
+            } else {
+                handleFetchError(e)
             }
-            _callLogs.value = tempLogsMap.mapValues { it.value.toList() }
-
-            // 3. Fetch vendors
-            val vendorsArr = SupabaseApi.fetchVendors(token)
-            val tempVendors = ArrayList<Vendor>()
-            for (i in 0 until vendorsArr.length()) {
-                val vObj = vendorsArr.getJSONObject(i)
-                val id = vObj.getInt("id")
-                val assignedTo = if (vObj.isNull("assigned_to")) null else vObj.optString("assigned_to", null)
-                val addressStr = vObj.optString("address", "")
-                val loc = getVendorLocation(addressStr)
-
-                // Retrieve brand list
-                val brandsList = ArrayList<String>()
-                if (!vObj.isNull("vendor_brands_list")) {
-                    val brandsArr = vObj.optJSONArray("vendor_brands_list")
-                    if (brandsArr != null) {
-                        for (bIdx in 0 until brandsArr.length()) {
-                            brandsList.add(brandsArr.getString(bIdx))
-                        }
-                    }
-                }
-
-                val vendorObj = Vendor(
-                    id = id,
-                    vendorId = if (vObj.isNull("vendor_id")) null else vObj.optInt("vendor_id"),
-                    vendorName = vObj.optString("vendor_name", "Unnamed Vendor"),
-                    previousVendorName = if (vObj.isNull("previous_vendor_name")) null else vObj.optString("previous_vendor_name", null),
-                    contactPersonName = if (vObj.isNull("contact_person_name")) null else vObj.optString("contact_person_name", null),
-                    contactPersonEmail = if (vObj.isNull("contact_person_email")) null else vObj.optString("contact_person_email", null),
-                    contactPersonMobile = if (vObj.isNull("contact_person_mobile")) null else vObj.optString("contact_person_mobile", null),
-                    address = addressStr,
-                    websiteUrl = if (vObj.isNull("website_url")) null else vObj.optString("website_url", null),
-                    rating = vObj.optDouble("rating", 0.0),
-                    consumerRatingCount = vObj.optInt("consumer_rating_count", 0),
-                    vendorBrandsList = brandsList,
-                    userRequestType = if (vObj.isNull("user_request_type")) null else vObj.optString("user_request_type", null),
-                    nationwiseCapacity = vObj.optDouble("nationwise_capacity", 0.0),
-                    nationwiseInstalls = vObj.optInt("nationwise_installs", 0),
-                    statewiseCapacity = vObj.optDouble("statewise_capacity", 0.0),
-                    statewiseInstalls = vObj.optInt("statewise_installs", 0),
-                    districtwiseCapacity = vObj.optDouble("districtwise_capacity", 0.0),
-                    districtwiseInstalls = vObj.optInt("districtwise_installs", 0),
-                    assignedTo = assignedTo,
-                    state = loc.state,
-                    district = loc.district
-                )
-
-                // Calculate in-memory merged states
-                val logsList = tempLogsMap[id] ?: emptyList()
-                vendorObj.status = if (logsList.isNotEmpty()) logsList.first().outcome else "Pending"
-
-                // Find latest follow up
-                val logWithFollowUp = logsList.firstOrNull { !it.followUpDate.isNullOrBlank() }
-                vendorObj.latestFollowUp = logWithFollowUp?.followUpDate
-
-                // Resolve assignee name
-                if (assignedTo != null) {
-                    vendorObj.assignedName = profilesMap[assignedTo]?.name
-                }
-
-                tempVendors.add(vendorObj)
-            }
-            _vendors.value = tempVendors
-            Log.d(TAG, "Successfully synced ${tempVendors.size} vendors and ${logsArr.length()} call logs.")
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching data from Supabase", e)
-            val sw = java.io.StringWriter()
-            e.printStackTrace(java.io.PrintWriter(sw))
-            val stack = sw.toString()
-            _error.value = "Failed to load database: ${e.message}\nStack: ${if (stack.length > 300) stack.substring(0, 300) else stack}"
+            handleFetchError(e)
         } finally {
             _isLoading.value = false
         }
+    }
+
+    private fun handleFetchError(e: Exception) {
+        Log.e(TAG, "Error fetching data from Supabase", e)
+        val sw = java.io.StringWriter()
+        e.printStackTrace(java.io.PrintWriter(sw))
+        val stack = sw.toString()
+        _error.value = "Failed to load database: ${e.message}\nStack: ${if (stack.length > 300) stack.substring(0, 300) else stack}"
+    }
+
+    private suspend fun doFetch(token: String) {
+        // 1. Fetch profiles
+        val profilesArr = SupabaseApi.fetchProfiles(token)
+        val tempProfiles = ArrayList<Profile>()
+        val profilesMap = HashMap<String, Profile>()
+        for (i in 0 until profilesArr.length()) {
+            val pObj = profilesArr.getJSONObject(i)
+            val p = Profile(
+                id = pObj.getString("id"),
+                email = pObj.getString("email"),
+                name = pObj.optString("name", pObj.getString("email").substringBefore("@")),
+                role = pObj.optString("role", "user")
+            )
+            tempProfiles.add(p)
+            profilesMap[p.id] = p
+        }
+        _profiles.value = tempProfiles
+
+        // 2. Fetch call logs
+        val logsArr = SupabaseApi.fetchCallLogs(token)
+        val tempLogsMap = HashMap<Int, MutableList<CallLog>>()
+        for (i in 0 until logsArr.length()) {
+            val lObj = logsArr.getJSONObject(i)
+            val vendorId = lObj.getInt("vendor_id")
+            val userId = lObj.getString("user_id")
+            val profile = profilesMap[userId]
+            val userName = profile?.name ?: userId.substringBefore("-")
+
+            val logEntry = CallLog(
+                id = lObj.getString("id"),
+                vendorId = vendorId,
+                timestamp = lObj.optString("timestamp", ""),
+                outcome = lObj.getString("outcome"),
+                note = lObj.optString("note", ""),
+                followUpDate = if (lObj.isNull("follow_up_date")) null else lObj.optString("follow_up_date", null),
+                userId = userId,
+                userName = userName
+            )
+            if (!tempLogsMap.containsKey(vendorId)) {
+                tempLogsMap[vendorId] = ArrayList()
+            }
+            tempLogsMap[vendorId]?.add(logEntry)
+        }
+        _callLogs.value = tempLogsMap.mapValues { it.value.toList() }
+
+        // 3. Fetch vendors
+        val vendorsArr = SupabaseApi.fetchVendors(token)
+        val tempVendors = ArrayList<Vendor>()
+        for (i in 0 until vendorsArr.length()) {
+            val vObj = vendorsArr.getJSONObject(i)
+            val id = vObj.getInt("id")
+            val assignedTo = if (vObj.isNull("assigned_to")) null else vObj.optString("assigned_to", null)
+            val addressStr = vObj.optString("address", "")
+            val loc = getVendorLocation(addressStr)
+
+            // Retrieve brand list
+            val brandsList = ArrayList<String>()
+            if (!vObj.isNull("vendor_brands_list")) {
+                val brandsArr = vObj.optJSONArray("vendor_brands_list")
+                if (brandsArr != null) {
+                    for (bIdx in 0 until brandsArr.length()) {
+                        brandsList.add(brandsArr.getString(bIdx))
+                    }
+                }
+            }
+
+            val vendorObj = Vendor(
+                id = id,
+                vendorId = if (vObj.isNull("vendor_id")) null else vObj.optInt("vendor_id"),
+                vendorName = vObj.optString("vendor_name", "Unnamed Vendor"),
+                previousVendorName = if (vObj.isNull("previous_vendor_name")) null else vObj.optString("previous_vendor_name", null),
+                contactPersonName = if (vObj.isNull("contact_person_name")) null else vObj.optString("contact_person_name", null),
+                contactPersonEmail = if (vObj.isNull("contact_person_email")) null else vObj.optString("contact_person_email", null),
+                contactPersonMobile = if (vObj.isNull("contact_person_mobile")) null else vObj.optString("contact_person_mobile", null),
+                address = addressStr,
+                websiteUrl = if (vObj.isNull("website_url")) null else vObj.optString("website_url", null),
+                rating = vObj.optDouble("rating", 0.0),
+                consumerRatingCount = vObj.optInt("consumer_rating_count", 0),
+                vendorBrandsList = brandsList,
+                userRequestType = if (vObj.isNull("user_request_type")) null else vObj.optString("user_request_type", null),
+                nationwiseCapacity = vObj.optDouble("nationwise_capacity", 0.0),
+                nationwiseInstalls = vObj.optInt("nationwise_installs", 0),
+                statewiseCapacity = vObj.optDouble("statewise_capacity", 0.0),
+                statewiseInstalls = vObj.optInt("statewise_installs", 0),
+                districtwiseCapacity = vObj.optDouble("districtwise_capacity", 0.0),
+                districtwiseInstalls = vObj.optInt("districtwise_installs", 0),
+                assignedTo = assignedTo,
+                state = loc.state,
+                district = loc.district
+            )
+
+            // Calculate in-memory merged states
+            val logsList = tempLogsMap[id] ?: emptyList()
+            vendorObj.status = if (logsList.isNotEmpty()) logsList.first().outcome else "Pending"
+
+            // Find latest follow up
+            val logWithFollowUp = logsList.firstOrNull { !it.followUpDate.isNullOrBlank() }
+            vendorObj.latestFollowUp = logWithFollowUp?.followUpDate
+
+            // Resolve assignee name
+            if (assignedTo != null) {
+                vendorObj.assignedName = profilesMap[assignedTo]?.name
+            }
+
+            tempVendors.add(vendorObj)
+        }
+        _vendors.value = tempVendors
+        Log.d(TAG, "Successfully synced ${tempVendors.size} vendors and ${logsArr.length()} call logs.")
     }
 
     override suspend fun logCall(

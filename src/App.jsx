@@ -619,11 +619,11 @@ function App() {
     const todayStr = new Date().toISOString().split('T')[0];
     const snapshotRecords = [];
     
-    uniqueIncoming.forEach(uv => {
-      const dbVendor = allUpdatedVendors.find(v => 
-        cleanStr(v.vendor_name).toLowerCase() === cleanStr(uv.vendor_name).toLowerCase()
+    allUpdatedVendors.forEach(dbVendor => {
+      const uv = uniqueIncoming.find(u => 
+        cleanStr(u.vendor_name).toLowerCase() === cleanStr(dbVendor.vendor_name).toLowerCase()
       );
-      if (dbVendor) {
+      if (uv) {
         snapshotRecords.push({
           vendor_id: dbVendor.id,
           snapshot_date: todayStr,
@@ -633,6 +633,17 @@ function App() {
           statewise_installs: uv.statewise_installs,
           districtwise_capacity: uv.districtwise_capacity,
           districtwise_installs: uv.districtwise_installs
+        });
+      } else {
+        snapshotRecords.push({
+          vendor_id: dbVendor.id,
+          snapshot_date: todayStr,
+          nationwise_capacity: parseFloat(dbVendor.nationwise_capacity || 0),
+          nationwise_installs: parseInt(dbVendor.nationwise_installs || 0),
+          statewise_capacity: parseFloat(dbVendor.statewise_capacity || 0),
+          statewise_installs: parseInt(dbVendor.statewise_installs || 0),
+          districtwise_capacity: parseFloat(dbVendor.districtwise_capacity || 0),
+          districtwise_installs: parseInt(dbVendor.districtwise_installs || 0)
         });
       }
     });

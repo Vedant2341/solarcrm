@@ -32,7 +32,8 @@ import {
   Lock,
   Loader2,
   Menu,
-  TrendingUp
+  TrendingUp,
+  UserPlus
 } from 'lucide-react';
 
 // Storage keys for migration fallback
@@ -1005,6 +1006,28 @@ function App() {
     return mergedVendors.filter(v => v.latestFollowUp === todayStr);
   }, [mergedVendors]);
 
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return 'Not Listed';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch (e) {
+      return 'Not Listed';
+    }
+  };
+
+  const newlyRegisteredCompanies = useMemo(() => {
+    const sorted = [...vendors].sort((a, b) => {
+      const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
+      const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateB.getTime() - dateA.getTime();
+      }
+      return b.id - a.id;
+    });
+    return sorted.slice(0, 5);
+  }, [vendors]);
+
   const formatGrowthValue = (value) => {
     if (value > 0) return `+${value.toLocaleString()}`;
     return value.toLocaleString();
@@ -1812,73 +1835,133 @@ function App() {
             </section>
 
             {/* Main Dashboard Layout */}
-            <div className="dashboard-grid">
-              
-              {/* Left Column: Today's Follow-up list */}
-              <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '400px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <CheckCircle style={{ color: 'var(--accent-cyan)' }} size={20} />
-                    <h3 style={{ fontSize: '1.2rem', margin: 0 }}>Scheduled Follow-Ups for Today</h3>
+            <div className="dashboard-grid">              {/* Left Column: Follow-ups and New Registrations */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* Card 1: Today's Follow-up list */}
+                <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '300px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <CheckCircle style={{ color: 'var(--accent-cyan)' }} size={20} />
+                      <h3 style={{ fontSize: '1.2rem', margin: 0 }}>Scheduled Follow-Ups for Today</h3>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <select
+                        value={followUpFilter}
+                        onChange={(e) => setFollowUpFilter(e.target.value)}
+                        className="input-field"
+                        style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border-glass)', height: '28px', cursor: 'pointer' }}
+                      >
+                        <option value="All">All Follow-ups</option>
+                        <option value="Mine">My Follow-ups</option>
+                      </select>
+                      <span className="badge badge-callback" style={{ fontSize: '0.7rem' }}>{filteredTodayFollowUps.length} PENDING</span>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <select
-                      value={followUpFilter}
-                      onChange={(e) => setFollowUpFilter(e.target.value)}
-                      className="input-field"
-                      style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border-glass)', height: '28px', cursor: 'pointer' }}
-                    >
-                      <option value="All">All Follow-ups</option>
-                      <option value="Mine">My Follow-ups</option>
-                    </select>
-                    <span className="badge badge-callback" style={{ fontSize: '0.7rem' }}>{filteredTodayFollowUps.length} PENDING</span>
-                  </div>
-                </div>
 
-                {filteredTodayFollowUps.length === 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)', gap: '10px', padding: '40px 0' }}>
-                    <Check style={{ width: '48px', height: '48px', color: 'var(--status-interested)', opacity: 0.6 }} />
-                    <p>No follow-ups scheduled for today. Awesome!</p>
-                    <button onClick={() => setActiveTab('directory')} className="btn-secondary" style={{ fontSize: '0.85rem' }}>Find leads to call</button>
-                  </div>
-                ) : (
-                  <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '420px', overflowY: 'auto', paddingRight: '6px' }}>
-                    {filteredTodayFollowUps.map(vendor => (
-                      <div key={vendor.id} className="follow-up-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <span style={{ fontWeight: '700', fontSize: '1rem' }}>{vendor.vendor_name}</span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
-                            📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
-                            {vendor.contact_person_mobile && (
-                              <a 
-                                href={getWhatsAppUrl(vendor.contact_person_mobile)} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                title="Send WhatsApp Message"
-                                className="whatsapp-icon-inline"
-                              >
-                                <WhatsAppIcon size={12} />
-                              </a>
-                            )}
-                          </span>
-                          {vendor.logs.length > 0 && (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontStyle: 'italic', background: 'rgba(6, 182, 212, 0.05)', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-cyan)', marginTop: '6px' }}>
-                              Last Note: "{vendor.logs[0].note}"
+                  {filteredTodayFollowUps.length === 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)', gap: '10px', padding: '40px 0' }}>
+                      <Check style={{ width: '48px', height: '48px', color: 'var(--status-interested)', opacity: 0.6 }} />
+                      <p>No follow-ups scheduled for today. Awesome!</p>
+                      <button onClick={() => setActiveTab('directory')} className="btn-secondary" style={{ fontSize: '0.85rem' }}>Find leads to call</button>
+                    </div>
+                  ) : (
+                    <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto', paddingRight: '6px' }}>
+                      {filteredTodayFollowUps.map(vendor => (
+                        <div key={vendor.id} className="follow-up-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span style={{ fontWeight: '700', fontSize: '1rem' }}>{vendor.vendor_name}</span>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                              📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
+                              {vendor.contact_person_mobile && (
+                                <a 
+                                  href={getWhatsAppUrl(vendor.contact_person_mobile)} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  title="Send WhatsApp Message"
+                                  className="whatsapp-icon-inline"
+                                >
+                                  <WhatsAppIcon size={12} />
+                                </a>
+                              )}
                             </span>
-                          )}
+                            {vendor.logs.length > 0 && (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontStyle: 'italic', background: 'rgba(6, 182, 212, 0.05)', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-cyan)', marginTop: '6px' }}>
+                                Last Note: "{vendor.logs[0].note}"
+                              </span>
+                            )}
+                          </div>
+                          <button 
+                            onClick={() => handleOpenCallModal(vendor)} 
+                            className="btn-primary" 
+                            style={{ padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem' }}
+                          >
+                            <Phone size={14} /> Call & Log
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => handleOpenCallModal(vendor)} 
-                          className="btn-primary" 
-                          style={{ padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem' }}
-                        >
-                          <Phone size={14} /> Call & Log
-                        </button>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Card 2: Newly Registered Companies */}
+                <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '300px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <UserPlus style={{ color: 'var(--status-interested)' }} size={20} />
+                      <h3 style={{ fontSize: '1.2rem', margin: 0 }}>Newly Registered Companies</h3>
+                    </div>
+                    <span className="badge badge-interested" style={{ fontSize: '0.7rem' }}>LATEST LEADS</span>
                   </div>
-                )}
-              </section>
+
+                  {newlyRegisteredCompanies.length === 0 ? (
+                    <div style={{ padding: '40px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
+                      No new companies found.
+                    </div>
+                  ) : (
+                    <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '400px', overflowY: 'auto', paddingRight: '6px' }}>
+                      {newlyRegisteredCompanies.map(vendor => (
+                        <div key={`new-${vendor.id}`} className="follow-up-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: '700', fontSize: '1.05rem' }}>{vendor.vendor_name}</span>
+                              <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', fontWeight: '600' }}>NEW</span>
+                            </div>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
+                              {vendor.contact_person_mobile && (
+                                <a 
+                                  href={getWhatsAppUrl(vendor.contact_person_mobile)} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  title="Send WhatsApp Message"
+                                  className="whatsapp-icon-inline"
+                                >
+                                  <WhatsAppIcon size={12} />
+                                </a>
+                              )}
+                            </span>
+                            <div style={{ display: 'flex', gap: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', flexWrap: 'wrap' }}>
+                              <span>📍 {vendor.district ? `${vendor.district}, ${vendor.state}` : vendor.address ? vendor.address.split(',').slice(-2).join(',').trim() : 'No Location'}</span>
+                              <span>•</span>
+                              <span>⚡ {vendor.nationwise_capacity?.toLocaleString() || 0} kW</span>
+                              <span>•</span>
+                              <span style={{ color: 'var(--accent-cyan)' }}>Registered: {formatDateTime(vendor.created_at)}</span>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => handleOpenCallModal(vendor)} 
+                            className="btn-primary" 
+                            style={{ padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem' }}
+                          >
+                            <Phone size={14} /> Call & Log
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
 
               {/* Right Column: Mini Calendar / Action Log */}
               <section style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -2356,6 +2439,33 @@ function App() {
                 </div>
               </div>
             </section>
+
+            {/* Top Pagination Controls */}
+            {totalPages > 1 && (
+              <section className="glass-panel" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button 
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', opacity: currentPage === 1 ? 0.5 : 1, cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                >
+                  <ChevronLeft size={16} /> Previous
+                </button>
+
+                <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                  Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+                </span>
+
+                <button 
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', opacity: currentPage === totalPages ? 0.5 : 1, cursor: currentPage === totalPages ? 'not-allowed' : 'pointer' }}
+                >
+                  Next <ChevronRight size={16} />
+                </button>
+              </section>
+            )}
 
             {/* Directory Cards Grid */}
             {filteredVendors.length === 0 ? (

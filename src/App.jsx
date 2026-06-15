@@ -1438,8 +1438,20 @@ function App() {
     reader.onload = async (evt) => {
       try {
         setIsLoading(true);
+        
+        // Refresh and verify session (handles 8-hour login token expiry)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+          throw new Error("Your login session has expired. Please log out and log in again to upload database updates.");
+        }
+
         const rawText = evt.target.result;
-        const rawData = JSON.parse(rawText);
+        let rawData;
+        try {
+          rawData = JSON.parse(rawText);
+        } catch (parseErr) {
+          throw new Error('Invalid JSON format. Please upload a valid JSON database file.');
+        }
         
         let rawRows = [];
         if (Array.isArray(rawData)) {
@@ -1461,7 +1473,7 @@ function App() {
           return;
         }
 
-        const uploadedVendors = rawRows.map((row) => mapJsonToDbVendor(row, user.id));
+        const uploadedVendors = rawRows.map((row) => mapJsonToDbVendor(row, session.user.id));
 
         // Sync uploaded vendors with database using name-based de-duplication
         const { insertedCount, updatedCount, skippedCount } = await syncVendorsWithDb(uploadedVendors);
@@ -1472,7 +1484,7 @@ function App() {
         await fetchData();
       } catch (err) {
         console.error(err);
-        alert('Failed to import JSON data. Ensure the JSON file is valid.');
+        alert(err.message || 'Failed to import JSON data. Ensure the JSON file is valid.');
       } finally {
         setIsLoading(false);
         e.target.value = ''; // Reset input
@@ -1506,7 +1518,21 @@ function App() {
     reader.onload = async (evt) => {
       try {
         setIsLoading(true);
-        const imported = JSON.parse(evt.target.result);
+
+        // Refresh and verify session (handles 8-hour login token expiry)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+          throw new Error("Your login session has expired. Please log out and log in again to import backup logs.");
+        }
+
+        const rawText = evt.target.result;
+        let imported;
+        try {
+          imported = JSON.parse(rawText);
+        } catch (parseErr) {
+          throw new Error('Invalid JSON format. Please upload a valid backup JSON file.');
+        }
+
         if (!imported.callLogs) {
           alert('Invalid file format. Import requires a file exported from this application.');
           setIsLoading(false);
@@ -1528,7 +1554,7 @@ function App() {
               outcome: log.outcome,
               note: log.note,
               follow_up_date: log.followUpDate || null,
-              user_id: user.id
+              user_id: session.user.id
             });
           });
         }
@@ -1545,7 +1571,8 @@ function App() {
         }
 
       } catch (err) {
-        alert('Failed to read import file. Make sure it is a valid JSON file.');
+        console.error(err);
+        alert(err.message || 'Failed to read import file. Make sure it is a valid JSON file.');
       } finally {
         setIsLoading(false);
       }

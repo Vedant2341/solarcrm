@@ -291,11 +291,17 @@ function App() {
     const pageSize = 1000;
 
     while (hasMore) {
-      const { data: chunk, error } = await supabase
+      let query = supabase
         .from(tableName)
         .select(selectQuery)
         .range(page * pageSize, (page + 1) * pageSize - 1)
         .order(orderByField, { ascending });
+
+      if (orderByField !== 'id') {
+        query = query.order('id', { ascending });
+      }
+
+      const { data: chunk, error } = await query;
 
       if (error) throw error;
 
@@ -591,30 +597,7 @@ function App() {
     }
 
     // 3. Record vendor capacity snapshots for today
-    let allUpdatedVendors = [];
-    let refetchPage = 0;
-    let refetchHasMore = true;
-    const refetchPageSize = 1000;
-    
-    while (refetchHasMore) {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .range(refetchPage * refetchPageSize, (refetchPage + 1) * refetchPageSize - 1)
-        .order('id', { ascending: true });
-        
-      if (error) throw error;
-      
-      if (data && data.length > 0) {
-        allUpdatedVendors = [...allUpdatedVendors, ...data];
-        refetchPage++;
-        if (data.length < refetchPageSize) {
-          refetchHasMore = false;
-        }
-      } else {
-        refetchHasMore = false;
-      }
-    }
+    const allUpdatedVendors = await fetchAllFromTable('vendors', '*', 'id', true);
 
     const todayStr = new Date().toISOString().split('T')[0];
     const snapshotRecords = [];
@@ -680,24 +663,7 @@ function App() {
       pastDate.setDate(pastDate.getDate() - 15);
       const pastDateStr = pastDate.toISOString().split('T')[0];
 
-      let allVendorsForMock = [];
-      let mockPage = 0;
-      let mockHasMore = true;
-      const mockPageSize = 1000;
-      while (mockHasMore) {
-        const { data, error } = await supabase
-          .from('vendors')
-          .select('*')
-          .range(mockPage * mockPageSize, (mockPage + 1) * mockPageSize - 1);
-        if (error) throw error;
-        if (data && data.length > 0) {
-          allVendorsForMock = [...allVendorsForMock, ...data];
-          mockPage++;
-          if (data.length < mockPageSize) mockHasMore = false;
-        } else {
-          mockHasMore = false;
-        }
-      }
+      const allVendorsForMock = await fetchAllFromTable('vendors', '*', 'id', true);
 
       const mockSnapshots = allVendorsForMock.map(v => ({
         vendor_id: v.id,
@@ -1034,6 +1000,17 @@ function App() {
     const todayStr = getTodayString();
     return mergedVendors.filter(v => v.latestFollowUp === todayStr);
   }, [mergedVendors]);
+
+  const formatGrowthValue = (value) => {
+    if (value > 0) return `+${value.toLocaleString()}`;
+    return value.toLocaleString();
+  };
+
+  const getGrowthColor = (value, defaultColor = 'var(--text-primary)') => {
+    if (value > 0) return '#10b981';
+    if (value < 0) return '#ef4444';
+    return defaultColor;
+  };
 
   // Growth & sync snapshots comparison analytics
   const growthComparison = useMemo(() => {
@@ -2084,20 +2061,20 @@ function App() {
                   {/* Growth Summary Cards */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
                     
-                    <div style={{ padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%)', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+                    <div style={{ padding: '16px', borderRadius: '12px', background: getGrowthColor(growthComparison.nationwise.capacityGrowth) === '#ef4444' ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.02) 100%)' : 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%)', border: getGrowthColor(growthComparison.nationwise.capacityGrowth) === '#ef4444' ? '1px solid rgba(239, 68, 68, 0.15)' : '1px solid rgba(16, 185, 129, 0.15)' }}>
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>National Capacity Growth</span>
-                      <strong style={{ fontSize: '1.4rem', color: '#10b981', display: 'block' }}>
-                        +{growthComparison.nationwise.capacityGrowth.toLocaleString()} kW
+                      <strong style={{ fontSize: '1.4rem', color: getGrowthColor(growthComparison.nationwise.capacityGrowth, '#10b981'), display: 'block' }}>
+                        {formatGrowthValue(growthComparison.nationwise.capacityGrowth)} kW
                       </strong>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                         Capacity went from {growthComparison.nationwise.startCapacity.toLocaleString()} kW to {growthComparison.nationwise.endCapacity.toLocaleString()} kW
                       </span>
                     </div>
 
-                    <div style={{ padding: '16px', borderRadius: '12px', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(6, 182, 212, 0.02) 100%)', border: '1px solid rgba(6, 182, 212, 0.15)' }}>
+                    <div style={{ padding: '16px', borderRadius: '12px', background: getGrowthColor(growthComparison.nationwise.installGrowth) === '#ef4444' ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.02) 100%)' : 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(6, 182, 212, 0.02) 100%)', border: getGrowthColor(growthComparison.nationwise.installGrowth) === '#ef4444' ? '1px solid rgba(239, 68, 68, 0.15)' : '1px solid rgba(6, 182, 212, 0.15)' }}>
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>New Installations Added</span>
-                      <strong style={{ fontSize: '1.4rem', color: 'var(--accent-cyan)', display: 'block' }}>
-                        +{growthComparison.nationwise.installGrowth} installs
+                      <strong style={{ fontSize: '1.4rem', color: getGrowthColor(growthComparison.nationwise.installGrowth, 'var(--accent-cyan)'), display: 'block' }}>
+                        {formatGrowthValue(growthComparison.nationwise.installGrowth)} installs
                       </strong>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                         Installations went from {growthComparison.nationwise.startInstalls} to {growthComparison.nationwise.endInstalls}
@@ -2142,11 +2119,11 @@ function App() {
                                 </span>
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#10b981' }}>
-                                  +{item.capDiff.toLocaleString()} kW
+                                <span style={{ fontSize: '0.85rem', fontWeight: '700', color: getGrowthColor(item.capDiff, '#10b981') }}>
+                                  {formatGrowthValue(item.capDiff)} kW
                                 </span>
-                                <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.1)', color: 'var(--accent-cyan)', fontWeight: '600' }}>
-                                  +{item.instDiff} installs
+                                <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: getGrowthColor(item.instDiff) === '#ef4444' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(6, 182, 212, 0.1)', color: getGrowthColor(item.instDiff, 'var(--accent-cyan)'), fontWeight: '600' }}>
+                                  {formatGrowthValue(item.instDiff)} installs
                                 </span>
                               </div>
                             </div>
@@ -2163,14 +2140,14 @@ function App() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '20px', background: 'rgba(255, 255, 255, 0.01)', borderRadius: '12px', border: '1px solid var(--border-glass)', justifyContent: 'center', flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>State-wide Capacity Growth:</span>
-                          <strong style={{ fontSize: '0.9rem', color: 'var(--accent-cyan)' }}>
-                            +{growthComparison.statewise.capacityGrowth.toLocaleString()} kW (+{growthComparison.statewise.installGrowth} installs)
+                          <strong style={{ fontSize: '0.9rem', color: getGrowthColor(growthComparison.statewise.capacityGrowth, 'var(--accent-cyan)') }}>
+                            {formatGrowthValue(growthComparison.statewise.capacityGrowth)} kW ({formatGrowthValue(growthComparison.statewise.installGrowth)} installs)
                           </strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>District-wide Capacity Growth:</span>
-                          <strong style={{ fontSize: '0.9rem', color: 'var(--accent-cyan)' }}>
-                            +{growthComparison.districtwise.capacityGrowth.toLocaleString()} kW (+{growthComparison.districtwise.installGrowth} installs)
+                          <strong style={{ fontSize: '0.9rem', color: getGrowthColor(growthComparison.districtwise.capacityGrowth, 'var(--accent-cyan)') }}>
+                            {formatGrowthValue(growthComparison.districtwise.capacityGrowth)} kW ({formatGrowthValue(growthComparison.districtwise.installGrowth)} installs)
                           </strong>
                         </div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4', marginTop: '10px' }}>

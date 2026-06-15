@@ -526,14 +526,18 @@ function App() {
     let skippedCount = 0;
 
     uniqueIncoming.forEach(uv => {
-      // Find matching existing vendor by company name (trimmed, case-insensitive)
-      const existing = allExistingVendors.find(v => 
-        cleanStr(v.vendor_name).toLowerCase() === cleanStr(uv.vendor_name).toLowerCase()
-      );
+      // Find matching existing vendor by vendor_id first, then by company name (trimmed, case-insensitive)
+      const existing = allExistingVendors.find(v => {
+        if (uv.vendor_id && v.vendor_id && Number(uv.vendor_id) === Number(v.vendor_id)) {
+          return true;
+        }
+        return cleanStr(v.vendor_name).toLowerCase() === cleanStr(uv.vendor_name).toLowerCase();
+      });
 
       if (existing) {
-        // Compare fields to see if anything changed
+        // Compare fields to see if anything changed (including name)
         const hasChanged = 
+          cleanStr(uv.vendor_name) !== cleanStr(existing.vendor_name) ||
           cleanNum(uv.vendor_id) !== cleanNum(existing.vendor_id) ||
           cleanStr(uv.previous_vendor_name) !== cleanStr(existing.previous_vendor_name) ||
           cleanStr(uv.contact_person_name) !== cleanStr(existing.contact_person_name) ||

@@ -33,7 +33,8 @@ import {
   Loader2,
   Menu,
   TrendingUp,
-  UserPlus
+  UserPlus,
+  Video
 } from 'lucide-react';
 
 // Storage keys for migration fallback
@@ -174,6 +175,8 @@ function App() {
   // --- Calendar Navigation ---
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null); // 'YYYY-MM-DD'
+  const [demoCalendarDate, setDemoCalendarDate] = useState(new Date());
+  const [selectedDemoCalendarDay, setSelectedDemoCalendarDay] = useState(null); // 'YYYY-MM-DD'
 
   // --- Multi-User & Admin States ---
   const [userRole, setUserRole] = useState('user'); // 'admin' | 'user'
@@ -978,8 +981,10 @@ function App() {
     let interested = 0;
     let callback = 0;
     let uninterested = 0;
+    let demoScheduled = 0;
     let called = 0;
     let todayFollowUps = 0;
+    let todayDemos = 0;
     
     const todayStr = getTodayString();
 
@@ -990,10 +995,15 @@ function App() {
         if (v.status === 'Interested') interested++;
         if (v.status === 'Callback') callback++;
         if (v.status === 'Uninterested') uninterested++;
+        if (v.status === 'Demo Scheduled') demoScheduled++;
       }
       
       if (v.latestFollowUp === todayStr) {
-        todayFollowUps++;
+        if (v.status === 'Demo Scheduled') {
+          todayDemos++;
+        } else {
+          todayFollowUps++;
+        }
       }
     });
 
@@ -1004,14 +1014,22 @@ function App() {
       interested,
       callback,
       uninterested,
-      todayFollowUps
+      demoScheduled,
+      todayFollowUps,
+      todayDemos
     };
   }, [mergedVendors]);
 
   // Today's Follow-up vendors
   const todayFollowUpVendors = useMemo(() => {
     const todayStr = getTodayString();
-    return mergedVendors.filter(v => v.latestFollowUp === todayStr);
+    return mergedVendors.filter(v => v.latestFollowUp === todayStr && v.status !== 'Demo Scheduled');
+  }, [mergedVendors]);
+
+  // Today's Demo vendors
+  const todayDemoVendors = useMemo(() => {
+    const todayStr = getTodayString();
+    return mergedVendors.filter(v => v.latestFollowUp === todayStr && v.status === 'Demo Scheduled');
   }, [mergedVendors]);
 
   const formatDateTime = (dateStr) => {
@@ -1273,6 +1291,81 @@ function App() {
     }
     return selectedDayVendors;
   }, [selectedDayVendors, followUpFilter, user]);
+
+  // --- Demo Calendar Computations ---
+  const demoCalendarDays = useMemo(() => {
+    const year = demoCalendarDate.getFullYear();
+    const month = demoCalendarDate.getMonth();
+    
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    
+    const days = [];
+    
+    // Previous month filler days
+    for (let i = firstDayIndex - 1; i >= 0; i--) {
+      const d = prevMonthLastDay - i;
+      const m = month === 0 ? 11 : month - 1;
+      const y = month === 0 ? year - 1 : year;
+      days.push({
+        dayNum: d,
+        dateString: `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        isCurrentMonth: false
+      });
+    }
+    
+    // Current month days
+    for (let d = 1; d <= lastDay; d++) {
+      days.push({
+        dayNum: d,
+        dateString: `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        isCurrentMonth: true
+      });
+    }
+    
+    // Next month filler days to complete grid
+    const remainingCells = 42 - days.length;
+    for (let d = 1; d <= remainingCells; d++) {
+      const m = month === 11 ? 0 : month + 1;
+      const y = month === 11 ? year + 1 : year;
+      days.push({
+        dayNum: d,
+        dateString: `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        isCurrentMonth: false
+      });
+    }
+    
+    return days;
+  }, [demoCalendarDate]);
+
+  // Map of demo dates and counts for calendar
+  const calendarDemoMap = useMemo(() => {
+    const map = {};
+    mergedVendors.forEach(v => {
+      if (v.status === 'Demo Scheduled' && v.latestFollowUp) {
+        if (!map[v.latestFollowUp]) {
+          map[v.latestFollowUp] = [];
+        }
+        map[v.latestFollowUp].push(v);
+      }
+    });
+    return map;
+  }, [mergedVendors]);
+
+  // Selected demo calendar day vendors
+  const selectedDemoDayVendors = useMemo(() => {
+    if (!selectedDemoCalendarDay) return [];
+    return calendarDemoMap[selectedDemoCalendarDay] || [];
+  }, [selectedDemoCalendarDay, calendarDemoMap]);
+
+  const filteredSelectedDemoDayVendors = useMemo(() => {
+    if (followUpFilter === 'Mine' && user) {
+      return selectedDemoDayVendors.filter(v => v.assigned_to === user.id);
+    }
+    return selectedDemoDayVendors;
+  }, [selectedDemoDayVendors, followUpFilter, user]);
 
   // --- Auth Handlers ---
   const handleLogin = async (e) => {
@@ -1626,6 +1719,14 @@ function App() {
     setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1));
   };
 
+  const handlePrevDemoMonth = () => {
+    setDemoCalendarDate(new Date(demoCalendarDate.getFullYear(), demoCalendarDate.getMonth() - 1, 1));
+  };
+  
+  const handleNextDemoMonth = () => {
+    setDemoCalendarDate(new Date(demoCalendarDate.getFullYear(), demoCalendarDate.getMonth() + 1, 1));
+  };
+
   const getMonthName = (date) => {
     return date.toLocaleString('default', { month: 'long', year: 'numeric' });
   };
@@ -1739,6 +1840,18 @@ function App() {
               </span>
             )}
           </button>
+
+          <button 
+            onClick={() => { setActiveTab('democalendar'); setIsSidebarOpen(false); }} 
+            className={`nav-btn ${activeTab === 'democalendar' ? 'active' : ''}`}
+          >
+            <Video size={18} style={{ color: 'var(--accent-purple)' }} /> Demo Calendar
+            {stats.todayDemos > 0 && (
+              <span className="nav-badge" style={{ backgroundColor: 'var(--accent-purple)', color: 'white' }}>
+                {stats.todayDemos}
+              </span>
+            )}
+          </button>
           
           {(userRole === 'admin' || (user && user.email?.toLowerCase() === 'vedant@vijapur.in')) && (
             <button 
@@ -1798,6 +1911,7 @@ function App() {
                 {activeTab === 'dashboard' && "Activity Dashboard"}
                 {activeTab === 'directory' && "Vendor Directory"}
                 {activeTab === 'calendar' && "Follow-Up Calendar"}
+                {activeTab === 'democalendar' && "Demo Calendar"}
                 {activeTab === 'settings' && "Database Management"}
                 {isLoading && <Loader2 className="animate-spin" style={{ color: 'var(--accent-cyan)', width: '20px', height: '20px' }} />}
               </h1>
@@ -1840,6 +1954,11 @@ function App() {
                 <span className="stat-label">Today's Follow-ups</span>
                 <span className="stat-value" style={{ color: 'var(--accent-pink)' }}>{stats.todayFollowUps}</span>
                 <span className="stat-desc">Scheduled for today</span>
+              </div>
+              <div className="glass-panel stat-card" style={{ borderLeft: '3px solid var(--accent-purple)' }}>
+                <span className="stat-label">Demos Scheduled</span>
+                <span className="stat-value" style={{ color: 'var(--accent-purple)' }}>{stats.demoScheduled}</span>
+                <span className="stat-desc">Active demo pipeline</span>
               </div>
             </section>
 
@@ -1896,6 +2015,60 @@ function App() {
                             </span>
                             {vendor.logs.length > 0 && (
                               <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontStyle: 'italic', background: 'rgba(6, 182, 212, 0.05)', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-cyan)', marginTop: '6px' }}>
+                                Last Note: "{vendor.logs[0].note}"
+                              </span>
+                            )}
+                          </div>
+                          <button 
+                            onClick={() => handleOpenCallModal(vendor)} 
+                            className="btn-primary" 
+                            style={{ padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem' }}
+                          >
+                            <Phone size={14} /> Call & Log
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Card 1b: Scheduled Demos for Today */}
+                <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '200px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Video style={{ color: 'var(--accent-purple)' }} size={20} />
+                      <h3 style={{ fontSize: '1.2rem', margin: 0 }}>Scheduled Demos for Today</h3>
+                    </div>
+                    <span className="badge badge-demo" style={{ fontSize: '0.7rem' }}>{todayDemoVendors.length} TODAY</span>
+                  </div>
+
+                  {todayDemoVendors.length === 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)', gap: '10px', padding: '30px 0' }}>
+                      <Video style={{ width: '40px', height: '40px', color: 'var(--accent-purple)', opacity: 0.5 }} />
+                      <p style={{ fontSize: '0.85rem' }}>No demos scheduled for today.</p>
+                    </div>
+                  ) : (
+                    <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto', paddingRight: '6px' }}>
+                      {todayDemoVendors.map(vendor => (
+                        <div key={`demo-${vendor.id}`} className="follow-up-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span style={{ fontWeight: '700', fontSize: '1.05rem' }}>{vendor.vendor_name}</span>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
+                              {vendor.contact_person_mobile && (
+                                <a 
+                                  href={getWhatsAppUrl(vendor.contact_person_mobile)} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  title="Send WhatsApp Message"
+                                  className="whatsapp-icon-inline"
+                                >
+                                  <WhatsAppIcon size={12} />
+                                </a>
+                              )}
+                            </span>
+                            {vendor.logs.length > 0 && (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--accent-purple)', fontStyle: 'italic', background: 'rgba(139, 92, 246, 0.05)', padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid var(--accent-purple)', marginTop: '6px' }}>
                                 Last Note: "{vendor.logs[0].note}"
                               </span>
                             )}
@@ -1994,6 +2167,14 @@ function App() {
                         <span style={{ fontWeight: '600', color: 'var(--status-callback)' }}>{stats.callback}</span>
                       </div>
                       <div className="progress-bg"><div className="progress-bar" style={{ width: `${(stats.callback / (stats.called || 1)) * 100}%`, backgroundColor: 'var(--status-callback)' }}></div></div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span>Demos Scheduled</span>
+                        <span style={{ fontWeight: '600', color: 'var(--accent-purple)' }}>{stats.demoScheduled}</span>
+                      </div>
+                      <div className="progress-bg"><div className="progress-bar" style={{ width: `${(stats.demoScheduled / (stats.called || 1)) * 100}%`, backgroundColor: 'var(--accent-purple)' }}></div></div>
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -2327,6 +2508,7 @@ function App() {
                     <option value="Pending">Pending (Not Called)</option>
                     <option value="Interested">Interested</option>
                     <option value="Callback">Callback Scheduled</option>
+                    <option value="Demo Scheduled">Demo Scheduled</option>
                     <option value="Uninterested">Not Interested</option>
                   </select>
                 </div>
@@ -2496,6 +2678,7 @@ function App() {
                       gap: '15px',
                       borderLeft: vendor.status === 'Interested' ? '4px solid var(--status-interested)' :
                                  vendor.status === 'Callback' ? '4px solid var(--status-callback)' :
+                                 vendor.status === 'Demo Scheduled' ? '4px solid var(--status-demo)' :
                                  vendor.status === 'Uninterested' ? '4px solid var(--status-uninterested)' :
                                  '1px solid var(--border-glass)'
                     }}
@@ -2786,6 +2969,185 @@ function App() {
                       >
                         <Phone size={12} /> Call & Log Update
                       </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
+
+        {/* --- PANEL: DEMO CALENDAR VIEW --- */}
+        {activeTab === 'democalendar' && (
+          <div className="animate-fade-in calendar-grid">
+            
+            {/* Calendar Sheet */}
+            <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Video size={20} style={{ color: 'var(--accent-purple)' }} /> Scheduled Demos Calendar
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button onClick={handlePrevDemoMonth} className="btn-secondary" style={{ padding: '8px' }}><ChevronLeft size={16} /></button>
+                  <span style={{ fontWeight: '700', minWidth: '150px', textAlign: 'center' }}>{getMonthName(demoCalendarDate)}</span>
+                  <button onClick={handleNextDemoMonth} className="btn-secondary" style={{ padding: '8px' }}><ChevronRight size={16} /></button>
+                </div>
+              </div>
+
+              {/* Grid Header (Days of week) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                <div>SUN</div>
+                <div>MON</div>
+                <div>TUE</div>
+                <div>WED</div>
+                <div>THU</div>
+                <div>FRI</div>
+                <div>SAT</div>
+              </div>
+
+              {/* Calendar Grid Cells */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', minHeight: '380px' }}>
+                {demoCalendarDays.map((cell, index) => {
+                  const dayDemos = calendarDemoMap[cell.dateString] || [];
+                  const isSelected = selectedDemoCalendarDay === cell.dateString;
+                  const isToday = cell.dateString === getTodayString();
+                  
+                  return (
+                    <div 
+                      key={index} 
+                      onClick={() => setSelectedDemoCalendarDay(cell.dateString)}
+                      className={`calendar-cell ${cell.isCurrentMonth ? '' : 'other-month'} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                      style={{
+                        background: isSelected ? 'rgba(139, 92, 246, 0.15)' : 'rgba(255, 255, 255, 0.01)',
+                        border: isSelected ? '1px solid var(--accent-purple)' : isToday ? '1px solid var(--accent-pink)' : '1px solid var(--border-glass)',
+                        borderRadius: '10px',
+                        padding: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        transition: 'all 0.2s ease',
+                        opacity: cell.isCurrentMonth ? 1 : 0.45
+                      }}
+                    >
+                      <span style={{ 
+                        fontSize: '0.9rem', 
+                        fontWeight: isToday ? '700' : '500',
+                        color: isToday ? 'var(--accent-pink)' : 'var(--text-primary)'
+                      }}>
+                        {cell.dayNum}
+                      </span>
+
+                      {dayDemos.length > 0 && (
+                        <div style={{ width: '100%', marginTop: '5px' }}>
+                          <span 
+                            className="badge" 
+                            style={{ 
+                              width: '100%', 
+                              justifyContent: 'center',
+                              fontSize: '0.65rem', 
+                              padding: '2px 4px', 
+                              backgroundColor: 'rgba(139, 92, 246, 0.15)', 
+                              color: 'var(--accent-purple)',
+                              border: '1px solid rgba(139, 92, 246, 0.3)'
+                            }}
+                          >
+                            {dayDemos.length} demo{dayDemos.length > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Day details Panel */}
+            <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.1rem', margin: 0 }}>
+                    {selectedDemoCalendarDay ? (
+                      `Scheduled Demos for ${new Date(selectedDemoCalendarDay).toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                    ) : (
+                      "Select a Calendar Day"
+                    )}
+                  </h3>
+                  {selectedDemoCalendarDay === getTodayString() && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--accent-purple)', fontWeight: '600', display: 'block', marginTop: '2px' }}>TODAY'S DEMOS</span>
+                  )}
+                </div>
+                {selectedDemoCalendarDay && (
+                  <select
+                    value={followUpFilter}
+                    onChange={(e) => setFollowUpFilter(e.target.value)}
+                    className="input-field"
+                    style={{ padding: '4px 8px', fontSize: '0.75rem', width: 'auto', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border-glass)', height: '28px', cursor: 'pointer' }}
+                  >
+                    <option value="All">All Demos</option>
+                    <option value="Mine">My Demos</option>
+                  </select>
+                )}
+              </div>
+
+              {!selectedDemoCalendarDay ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', padding: '40px 0' }}>
+                  <p>Click any day on the calendar to view scheduled demos.</p>
+                </div>
+              ) : filteredSelectedDemoDayVendors.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', padding: '40px 0' }}>
+                  <p>No demos scheduled for this day.</p>
+                </div>
+              ) : (
+                <div className="scroll-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', maxHeight: '450px' }}>
+                  {filteredSelectedDemoDayVendors.map(vendor => (
+                    <div key={vendor.id} style={{ padding: '14px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-glass)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                        <span style={{ fontWeight: '700', fontSize: '0.95rem', color: 'var(--text-primary)' }}>{vendor.vendor_name}</span>
+                        <span className="badge badge-demo" style={{ fontSize: '0.65rem' }}>Demo Scheduled</span>
+                      </div>
+                      
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center' }}>
+                        📞 {vendor.contact_person_name || 'Not Listed'} ({vendor.contact_person_mobile || 'No Phone'})
+                        {vendor.contact_person_mobile && (
+                          <a 
+                            href={getWhatsAppUrl(vendor.contact_person_mobile)} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            title="Send WhatsApp Message"
+                            className="whatsapp-icon-inline"
+                          >
+                            <WhatsAppIcon size={12} />
+                          </a>
+                        )}
+                      </p>
+
+                      {vendor.logs.length > 0 && (
+                        <div style={{ fontSize: '0.75rem', background: 'rgba(255,255,255,0.03)', padding: '8px', borderRadius: '6px', color: 'var(--text-muted)', marginBottom: '10px', borderLeft: '2px solid var(--accent-purple)' }}>
+                          <strong>Last Update Note:</strong> "{vendor.logs[0].note}"
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid var(--border-glass)', paddingTop: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {vendor.latestFollowUp ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--accent-purple)' }}>
+                            <Clock size={12} />
+                            <span>Demo Date: {vendor.latestFollowUp}</span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No date set</span>
+                        )}
+
+                        <button 
+                          onClick={() => handleOpenCallModal(vendor)} 
+                          className="btn-primary" 
+                          style={{ padding: '6px 12px', fontSize: '0.75rem', width: '100%', justifyContent: 'center', borderRadius: '8px' }}
+                        >
+                          <Phone size={12} /> Call & Log Update
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -3239,12 +3601,15 @@ function App() {
                   >
                     <option value="Interested">Interested Lead</option>
                     <option value="Callback">Schedule Callback</option>
+                    <option value="Demo Scheduled">Demo Scheduled</option>
                     <option value="Uninterested">Not Interested</option>
                   </select>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Next Follow-Up Date</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    {callOutcome === 'Demo Scheduled' ? 'Scheduled Demo Date' : 'Next Follow-Up Date'}
+                  </label>
                   <input 
                     type="date" 
                     value={customFollowUpDate}

@@ -27,6 +27,7 @@
   --status-interested: #10b981;
   --status-callback: #f59e0b;
   --status-uninterested: #ef4444;
+  --status-demo: #8b5cf6;
   
   /* Shadow system */
   --shadow-sm: 0 2px 8px -1px rgba(0, 0, 0, 0.2);
@@ -312,6 +313,8 @@ select.input-field {
 .badge-interested { background: rgba(16, 185, 129, 0.12); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.25); }
 .badge-callback { background: rgba(245, 158, 11, 0.12); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.25); }
 .badge-uninterested { background: rgba(239, 68, 68, 0.12); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.25); }
+.badge-demo { background: rgba(139, 92, 246, 0.12); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.25); }
+.badge-demo-scheduled { background: rgba(139, 92, 246, 0.12); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.25); }
 
 /* Progress pipeline */
 .progress-bg {

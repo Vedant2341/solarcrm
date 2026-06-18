@@ -3638,12 +3638,25 @@ function App() {
 
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '5px' }}>
                 <a 
-                  href={`tel:${selectedVendor.mobile}`}
-                  onClick={() => {
+                  href={selectedVendor.contact_person_mobile ? `tel:${selectedVendor.contact_person_mobile}` : '#'}
+                  onClick={(e) => {
+                    if (!selectedVendor.contact_person_mobile) {
+                      e.preventDefault();
+                      return;
+                    }
                     if (!callNote) setCallNote('Dialed phone number.');
                   }}
                   className="btn-secondary" 
-                  style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '6px', textDecoration: 'none', padding: '8px 16px' }}
+                  style={{ 
+                    fontSize: '0.85rem', 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    gap: '6px', 
+                    textDecoration: 'none', 
+                    padding: '8px 16px',
+                    opacity: selectedVendor.contact_person_mobile ? 1 : 0.5,
+                    cursor: selectedVendor.contact_person_mobile ? 'pointer' : 'not-allowed'
+                  }}
                 >
                   <Phone size={14} /> Open Phone Dialer
                 </a>

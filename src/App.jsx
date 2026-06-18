@@ -285,6 +285,14 @@ function App() {
     }
   }, [user, fetchedUserId]);
 
+  // --- Prevent standard users from accessing the settings tab ---
+  useEffect(() => {
+    const isAdmin = userRole === 'admin' || (user && user.email?.toLowerCase() === 'vedant@vijapur.in');
+    if (!isAdmin && activeTab === 'settings') {
+      setActiveTab('dashboard');
+    }
+  }, [userRole, user, activeTab]);
+
   const fetchAllFromTable = async (tableName, selectQuery, orderByField, ascending = true) => {
     let allData = [];
     let hasMore = true;
@@ -1291,6 +1299,7 @@ function App() {
   const handleLogout = async () => {
     if (window.confirm('Are you sure you want to sign out?')) {
       setIsLoading(true);
+      setActiveTab('dashboard');
       await supabase.auth.signOut();
       setIsLoading(false);
     }

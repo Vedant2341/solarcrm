@@ -1638,6 +1638,63 @@ function App() {
     downloadAnchor.remove();
   };
 
+  // VCF Contacts Export Handler
+  const handleExportVCF = () => {
+    // Only export vendors that have a mobile/phone number
+    const contactsToExport = sortedVendors.filter(v => v.contact_person_mobile && v.contact_person_mobile.trim() !== '');
+
+    if (contactsToExport.length === 0) {
+      alert("No contacts with mobile numbers found in the current list to export.");
+      return;
+    }
+
+    let vcfContent = "";
+    contactsToExport.forEach(v => {
+      const company = (v.vendor_name || "Unnamed Company").replace(/[,;\\]/g, '\\$&').trim();
+      const contact = (v.contact_person_name || "").replace(/[,;\\]/g, '\\$&').trim();
+      const phone = v.contact_person_mobile.trim();
+      
+      // Full name format: "Company Name (Contact Name)" or just "Company Name"
+      const fullName = contact ? `${company} (${contact})` : company;
+
+      vcfContent += "BEGIN:VCARD\r\n";
+      vcfContent += "VERSION:3.0\r\n";
+      vcfContent += `FN:${fullName}\r\n`;
+      vcfContent += `ORG:${company}\r\n`;
+      if (contact) {
+        vcfContent += `N:;${contact};;;\r\n`;
+      } else {
+        vcfContent += `N:;${company};;;\r\n`;
+      }
+      vcfContent += `TEL;TYPE=CELL,VOICE:${phone}\r\n`;
+      vcfContent += "END:VCARD\r\n";
+    });
+
+    const blob = new Blob([vcfContent], { type: "text/vcard;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", url);
+    
+    // Create a descriptive file name based on active filters
+    let filename = "solar_crm_contacts";
+    if (stateFilter !== 'All') {
+      filename += `_${stateFilter.toLowerCase().replace(/\s+/g, '_')}`;
+    }
+    if (districtFilter !== 'All') {
+      filename += `_${districtFilter.toLowerCase().replace(/\s+/g, '_')}`;
+    }
+    if (statusFilter !== 'All') {
+      filename += `_${statusFilter.toLowerCase().replace(/\s+/g, '_')}`;
+    }
+    filename += ".vcf";
+
+    downloadAnchor.setAttribute("download", filename);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
   // Data Import Handler
   const handleImportData = async (e) => {
     const file = e.target.files[0];
@@ -2625,8 +2682,27 @@ function App() {
                   </div>
                 </div>
 
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  Found <strong>{filteredVendors.length}</strong> matching leads | Total Capacity: <strong>{totalFilteredCapacity.toLocaleString()} kW</strong> (Page {currentPage}/{totalPages || 1})
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Found <strong>{filteredVendors.length}</strong> matching leads | Total Capacity: <strong>{totalFilteredCapacity.toLocaleString()} kW</strong> (Page {currentPage}/{totalPages || 1})
+                  </div>
+                  <button 
+                    onClick={handleExportVCF}
+                    className="btn-primary" 
+                    style={{ 
+                      padding: '6px 14px', 
+                      fontSize: '0.8rem', 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '6px',
+                      background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                      borderColor: '#10B981',
+                      color: 'white',
+                      fontWeight: '600'
+                    }}
+                  >
+                    <Download size={14} /> Export Contacts (VCF)
+                  </button>
                 </div>
               </div>
             </section>

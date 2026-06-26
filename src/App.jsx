@@ -1654,18 +1654,14 @@ function App() {
       const contact = (v.contact_person_name || "").replace(/[,;\\]/g, '\\$&').trim();
       const phone = v.contact_person_mobile.trim();
       
-      // Full name format: "Company Name (Contact Name)" or just "Company Name"
-      const fullName = contact ? `${company} (${contact})` : company;
+      // Full name format: "Company Name - Contact Name" or just "Company Name"
+      const fullName = contact ? `${company} - ${contact}` : company;
 
       vcfContent += "BEGIN:VCARD\r\n";
       vcfContent += "VERSION:3.0\r\n";
       vcfContent += `FN:${fullName}\r\n`;
       vcfContent += `ORG:${company}\r\n`;
-      if (contact) {
-        vcfContent += `N:;${contact};;;\r\n`;
-      } else {
-        vcfContent += `N:;${company};;;\r\n`;
-      }
+      vcfContent += `N:;${fullName};;;\r\n`;
       vcfContent += `TEL;TYPE=CELL,VOICE:${phone}\r\n`;
       vcfContent += "END:VCARD\r\n";
     });

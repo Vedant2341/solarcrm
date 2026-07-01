@@ -399,10 +399,10 @@ function App() {
       const uniqueDates = [...new Set(dbSnapshots.map(s => s.snapshot_date))];
       setAvailableDates(uniqueDates);
 
-      // Default Comparison Date Range (earliest as start, latest as end)
+      // Default Comparison Date Range (last two syncs by default)
       if (uniqueDates.length >= 2) {
-        setGrowthStartDate(uniqueDates[uniqueDates.length - 1]);
-        setGrowthEndDate(uniqueDates[0]);
+        setGrowthStartDate(uniqueDates[1]); // Second latest sync date
+        setGrowthEndDate(uniqueDates[0]);   // Latest sync date
       } else if (uniqueDates.length === 1) {
         setGrowthStartDate(uniqueDates[0]);
         setGrowthEndDate(uniqueDates[0]);

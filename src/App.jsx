@@ -2465,26 +2465,59 @@ function App() {
                             No vendor records changed between these two dates.
                           </div>
                         ) : (
-                          growthComparison.vendorsGrowth.map(item => (
-                            <div key={`growth-${item.id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '65%' }}>
-                                <span style={{ fontWeight: '700', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {item.vendor_name}
-                                </span>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                  {item.address ? item.address.split(',').slice(-2).join(',').trim() : 'No Address'}
-                                </span>
+                          growthComparison.vendorsGrowth.map(item => {
+                            const vendorObj = mergedVendors.find(v => v.id === item.id);
+                            return (
+                              <div 
+                                key={`growth-${item.id}`} 
+                                onClick={() => {
+                                  if (vendorObj) {
+                                    handleOpenCallModal(vendorObj);
+                                  }
+                                }}
+                                style={{ 
+                                  display: 'flex', 
+                                  justifyContent: 'space-between', 
+                                  alignItems: 'center', 
+                                  padding: '12px 16px', 
+                                  background: 'rgba(255, 255, 255, 0.02)', 
+                                  borderRadius: '8px', 
+                                  border: '1px solid var(--border-glass)',
+                                  cursor: vendorObj ? 'pointer' : 'default',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (vendorObj) {
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                                    e.currentTarget.style.borderColor = 'var(--accent-cyan)';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (vendorObj) {
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+                                    e.currentTarget.style.borderColor = 'var(--border-glass)';
+                                  }
+                                }}
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '65%' }}>
+                                  <span style={{ fontWeight: '700', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {item.vendor_name}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    {item.address ? item.address.split(',').slice(-2).join(',').trim() : 'No Address'}
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                  <span style={{ fontSize: '0.85rem', fontWeight: '700', color: getGrowthColor(item.capDiff, '#10b981') }}>
+                                    {formatGrowthValue(item.capDiff)} kW
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: getGrowthColor(item.instDiff) === '#ef4444' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(6, 182, 212, 0.1)', color: getGrowthColor(item.instDiff, 'var(--accent-cyan)'), fontWeight: '600' }}>
+                                    {formatGrowthValue(item.instDiff)} installs
+                                  </span>
+                                </div>
                               </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                <span style={{ fontSize: '0.85rem', fontWeight: '700', color: getGrowthColor(item.capDiff, '#10b981') }}>
-                                  {formatGrowthValue(item.capDiff)} kW
-                                </span>
-                                <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: getGrowthColor(item.instDiff) === '#ef4444' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(6, 182, 212, 0.1)', color: getGrowthColor(item.instDiff, 'var(--accent-cyan)'), fontWeight: '600' }}>
-                                  {formatGrowthValue(item.instDiff)} installs
-                                </span>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>

@@ -1691,6 +1691,144 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Meta/Facebook Ads CSV Export Handler
+  const handleExportFacebookCSV = () => {
+    // For Facebook Ads, we need contacts that have either a phone number or an email address
+    const contactsToExport = sortedVendors.filter(v => 
+      (v.contact_person_mobile && v.contact_person_mobile.trim() !== '') ||
+      (v.contact_person_email && v.contact_person_email.trim() !== '')
+    );
+
+    if (contactsToExport.length === 0) {
+      alert("No contacts with mobile numbers or emails found in the current list to export.");
+      return;
+    }
+
+    const headers = [
+      'email',
+      'phone',
+      'add_to_me',
+      'madid',
+      'fn',
+      'ln',
+      'zip',
+      'ct',
+      'st',
+      'country',
+      'dob',
+      'doby',
+      'gen',
+      'age',
+      'uid'
+    ];
+
+    const escapeCSV = (val) => {
+      if (val === null || val === undefined) return '';
+      let str = String(val).trim();
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        str = '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const csvRows = [headers.join(',')];
+
+    contactsToExport.forEach(v => {
+      let email = (v.contact_person_email || '').trim().toLowerCase();
+      
+      let rawPhone = v.contact_person_mobile || '';
+      let cleanedPhone = rawPhone.replace(/\D/g, ''); // Extract only digits
+      if (cleanedPhone.length === 10) {
+        cleanedPhone = '91' + cleanedPhone; // Default to India country code 91 if it's a 10-digit number
+      }
+
+      let fn = '';
+      let ln = '';
+      if (v.contact_person_name) {
+        const parts = v.contact_person_name.trim().split(/\s+/);
+        fn = parts[0] || '';
+        if (parts.length > 1) {
+          ln = parts.slice(1).join(' ');
+        }
+      }
+
+      // Try to parse zip code from the address field
+      let zip = '';
+      if (v.address) {
+        // Look for 6-digit PIN code (India)
+        const pinMatch = v.address.match(/\b\d{6}\b/);
+        if (pinMatch) {
+          zip = pinMatch[0];
+        } else {
+          // Look for 5-digit ZIP code (US)
+          const zipMatch = v.address.match(/\b\d{5}\b/);
+          if (zipMatch) {
+            zip = zipMatch[0];
+          }
+        }
+      }
+
+      let ct = v.district && v.district !== 'Other' ? v.district : '';
+      let st = v.state && v.state !== 'Unknown' ? v.state : '';
+      
+      // Attempt to identify country, default to 'IN'
+      let country = 'IN';
+      if (v.address) {
+        const addrLower = v.address.toLowerCase();
+        if (addrLower.includes('usa') || addrLower.includes('united states') || addrLower.includes('u.s.a.')) {
+          country = 'US';
+        } else if (addrLower.includes('united kingdom') || addrLower.includes('\buk\b') || addrLower.includes('london')) {
+          country = 'GB';
+        }
+      }
+
+      const row = [
+        escapeCSV(email),
+        escapeCSV(cleanedPhone),
+        escapeCSV('Yes'),
+        escapeCSV(''), // madid (empty)
+        escapeCSV(fn),
+        escapeCSV(ln),
+        escapeCSV(zip),
+        escapeCSV(ct),
+        escapeCSV(st),
+        escapeCSV(country),
+        escapeCSV(''), // dob (empty)
+        escapeCSV(''), // doby (empty)
+        escapeCSV(''), // gen (empty)
+        escapeCSV(''), // age (empty)
+        escapeCSV('')  // uid (empty)
+      ];
+
+      csvRows.push(row.join(','));
+    });
+
+    const csvContent = csvRows.join('\r\n');
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", url);
+
+    // Create a descriptive file name based on active filters
+    let filename = "meta_ads_leads";
+    if (stateFilter !== 'All') {
+      filename += `_${stateFilter.toLowerCase().replace(/\s+/g, '_')}`;
+    }
+    if (districtFilter !== 'All') {
+      filename += `_${districtFilter.toLowerCase().replace(/\s+/g, '_')}`;
+    }
+    if (statusFilter !== 'All') {
+      filename += `_${statusFilter.toLowerCase().replace(/\s+/g, '_')}`;
+    }
+    filename += ".csv";
+
+    downloadAnchor.setAttribute("download", filename);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
   // Data Import Handler
   const handleImportData = async (e) => {
     const file = e.target.files[0];
@@ -2715,23 +2853,42 @@ function App() {
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     Found <strong>{filteredVendors.length}</strong> matching leads | Total Capacity: <strong>{totalFilteredCapacity.toLocaleString()} kW</strong> (Page {currentPage}/{totalPages || 1})
                   </div>
-                  <button 
-                    onClick={handleExportVCF}
-                    className="btn-primary" 
-                    style={{ 
-                      padding: '6px 14px', 
-                      fontSize: '0.8rem', 
-                      display: 'inline-flex', 
-                      alignItems: 'center', 
-                      gap: '6px',
-                      background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-                      borderColor: '#10B981',
-                      color: 'white',
-                      fontWeight: '600'
-                    }}
-                  >
-                    <Download size={14} /> Export Contacts (VCF)
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={handleExportVCF}
+                      className="btn-primary" 
+                      style={{ 
+                        padding: '6px 14px', 
+                        fontSize: '0.8rem', 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '6px',
+                        background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                        borderColor: '#10B981',
+                        color: 'white',
+                        fontWeight: '600'
+                      }}
+                    >
+                      <Download size={14} /> Export Contacts (VCF)
+                    </button>
+                    <button 
+                      onClick={handleExportFacebookCSV}
+                      className="btn-primary" 
+                      style={{ 
+                        padding: '6px 14px', 
+                        fontSize: '0.8rem', 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '6px',
+                        background: 'linear-gradient(135deg, #1877F2 0%, #166FE5 100%)',
+                        borderColor: '#1877F2',
+                        color: 'white',
+                        fontWeight: '600'
+                      }}
+                    >
+                      <Download size={14} /> Export Facebook Ads (CSV)
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>

@@ -805,6 +805,24 @@ function App() {
 
   // --- Computed Vendors list with status and latest follow up date merged ---
   const mergedVendors = useMemo(() => {
+    // Find the last two sync dates
+    const latestDate = availableDates[0] || null;
+    const prevDate = availableDates[1] || null;
+
+    // Create lookup maps for performance
+    const latestCapMap = {};
+    const prevCapMap = {};
+
+    if (latestDate && prevDate && snapshots.length > 0) {
+      snapshots.forEach(s => {
+        if (s.snapshot_date === latestDate) {
+          latestCapMap[s.vendor_id] = parseFloat(s.nationwise_capacity) || 0;
+        } else if (s.snapshot_date === prevDate) {
+          prevCapMap[s.vendor_id] = parseFloat(s.nationwise_capacity) || 0;
+        }
+      });
+    }
+
     return vendors.map(vendor => {
       const status = vendorStatuses[vendor.id] || 'Pending';
       const logs = callLogs[vendor.id] || [];
@@ -818,6 +836,12 @@ function App() {
         }
       }
       const loc = getVendorLocation(vendor.address);
+
+      // Compute capacity difference between last two syncs
+      const latestCap = latestCapMap[vendor.id] !== undefined ? latestCapMap[vendor.id] : (parseFloat(vendor.nationwise_capacity) || 0);
+      const prevCap = prevCapMap[vendor.id] !== undefined ? prevCapMap[vendor.id] : 0;
+      const capacityDiff = latestCap - prevCap;
+
       return {
         ...vendor,
         status,
@@ -825,10 +849,11 @@ function App() {
         logs,
         assignedName: vendor.profiles?.name || vendor.profiles?.email?.split('@')[0] || null,
         state: loc.state,
-        district: loc.district
+        district: loc.district,
+        capacity_difference: capacityDiff
       };
     });
-  }, [vendors, callLogs, vendorStatuses]);
+  }, [vendors, callLogs, vendorStatuses, availableDates, snapshots]);
 
   // --- Filters ---
   const filteredVendors = useMemo(() => {
@@ -2804,6 +2829,7 @@ function App() {
                     className="input-field"
                     style={{ cursor: 'pointer', padding: '4px 12px', fontSize: '0.85rem', width: 'auto', height: '32px' }}
                   >
+                    <option value="capacity_difference">Capacity Growth (Last 2 Syncs)</option>
                     <option value="nationwise_capacity">Nation-wise Capacity (kW)</option>
                     <option value="statewise_capacity">State-wide Capacity (kW)</option>
                     <option value="districtwise_capacity">District-wide Capacity (kW)</option>
@@ -3017,6 +3043,14 @@ function App() {
                           <span>📍 District Capacity:</span>
                           <span style={{ color: 'var(--accent-cyan)', fontWeight: '600' }}>{vendor.districtwise_capacity?.toLocaleString() || 0} kW ({vendor.districtwise_installs || 0} inst)</span>
                         </div>
+                        {(sortBy === 'capacity_difference' || (vendor.capacity_difference !== undefined && vendor.capacity_difference !== 0)) && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', background: 'rgba(16, 185, 129, 0.05)', padding: '4px 8px', borderRadius: '4px', marginTop: '4px' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>📈 Capacity Growth:</span>
+                            <span style={{ color: (vendor.capacity_difference || 0) > 0 ? '#10b981' : (vendor.capacity_difference || 0) < 0 ? '#ef4444' : 'var(--text-secondary)', fontWeight: '700' }}>
+                              {(vendor.capacity_difference || 0) > 0 ? '+' : ''}{(vendor.capacity_difference || 0).toLocaleString()} kW
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 

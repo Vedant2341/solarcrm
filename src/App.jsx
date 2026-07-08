@@ -164,7 +164,7 @@ function App() {
 
   const [stateFilter, setStateFilter] = useState('All');
   const [districtFilter, setDistrictFilter] = useState('All');
-  const [sortBy, setSortBy] = useState('capacity');
+  const [sortBy, setSortBy] = useState('capacity_difference');
   const [sortOrder, setSortOrder] = useState('desc');
 
   // --- Dashboard Analytics States ---

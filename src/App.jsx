@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import initialVendors from './data/vendors.json';
 import { parseFollowUpDate } from './utils/dateParser.js';
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient.js';
 import { createClient } from '@supabase/supabase-js';
@@ -99,8 +98,7 @@ const getVendorLocation = (address) => {
   return { state, district };
 };
 
-// Guard to prevent double seeding in React StrictMode
-let isSeedingActive = false;
+
 
 // Clean & format mobile number to launch WhatsApp chat (defaulting to +91 country code for 10 digits)
 const getWhatsAppUrl = (mobile) => {
@@ -344,11 +342,7 @@ function App() {
       // 2. Fetch all Vendors
       const dbVendors = await fetchAllFromTable('vendors', '*', 'id', true);
 
-      // Auto-Seed default vendors if 0 vendors found in database
-      if (dbVendors.length === 0) {
-        await seedDefaultVendors();
-        return; // seedDefaultVendors will re-trigger fetchData when done
-      }
+
 
       // Map profiles to vendors in memory
       const vendorsWithProfiles = dbVendors.map(vendor => {
@@ -412,8 +406,7 @@ function App() {
         await fetchUsersList();
       }
 
-      // 5. Trigger Zero Data Loss Migration (Upload localStorage items if any)
-      await migrateLocalStorageData(dbVendors);
+
 
     } catch (err) {
       console.error('Error fetching Supabase data:', err);
@@ -661,123 +654,7 @@ function App() {
     return { insertedCount, updatedCount, skippedCount };
   };
 
-  // --- Auto-Seeding: Bulk upsert default vendors to cloud ---
-  const seedDefaultVendors = async (showPrompt = false) => {
-    if (isSeedingActive) return;
-    isSeedingActive = true;
-    if (showPrompt) setIsLoading(true);
-    try {
-      console.log('Seeding/Syncing default vendors from nikunj.json...');
-      const vendorsToInsert = initialVendors.map(v => mapJsonToDbVendor(v, user.id));
 
-      const { insertedCount, updatedCount, skippedCount } = await syncVendorsWithDb(vendorsToInsert);
-      
-      console.log('Vendors successfully synchronized/seeded! Creating mock historical snapshots...');
-      
-      // Generate mock historical snapshots dated 15 days ago at 90% capacity/installs
-      const pastDate = new Date();
-      pastDate.setDate(pastDate.getDate() - 15);
-      const pastDateStr = pastDate.toISOString().split('T')[0];
-
-      const allVendorsForMock = await fetchAllFromTable('vendors', '*', 'id', true);
-
-      const mockSnapshots = allVendorsForMock.map(v => ({
-        vendor_id: v.id,
-        snapshot_date: pastDateStr,
-        nationwise_capacity: Math.round((parseFloat(v.nationwise_capacity || 0) * 0.9) * 100) / 100,
-        nationwise_installs: Math.max(0, Math.round(parseInt(v.nationwise_installs || 0) * 0.9)),
-        statewise_capacity: Math.round((parseFloat(v.statewise_capacity || 0) * 0.9) * 100) / 100,
-        statewise_installs: Math.max(0, Math.round(parseInt(v.statewise_installs || 0) * 0.9)),
-        districtwise_capacity: Math.round((parseFloat(v.districtwise_capacity || 0) * 0.9) * 100) / 100,
-        districtwise_installs: Math.max(0, Math.round(parseInt(v.districtwise_installs || 0) * 0.9))
-      }));
-
-      if (mockSnapshots.length > 0) {
-        const chunkSize = 200;
-        for (let i = 0; i < mockSnapshots.length; i += chunkSize) {
-          const chunk = mockSnapshots.slice(i, i + chunkSize);
-          const { error: mockError } = await supabase
-            .from('vendor_snapshots')
-            .upsert(chunk, { onConflict: 'vendor_id,snapshot_date' });
-          if (mockError) throw mockError;
-        }
-      }
-
-      console.log('Mock historical snapshots successfully created!');
-      if (showPrompt) {
-        alert(`Database synced with local JSON data!\nSync details: ${insertedCount} new vendors added, ${updatedCount} existing vendors updated, and ${skippedCount} unchanged vendors were skipped.`);
-      }
-      // Re-fetch now that database is seeded/synchronized
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to seed/sync vendors:', err);
-      if (showPrompt) {
-        alert('Failed to sync database with local JSON data.');
-      }
-      setIsLoading(false);
-    } finally {
-      isSeedingActive = false;
-      if (showPrompt) setIsLoading(false);
-    }
-  };
-
-  // --- Zero Data Loss Migration: Move localStorage logs to Supabase ---
-  const migrateLocalStorageData = async (dbVendors) => {
-    const localLogsStr = localStorage.getItem(LOGS_STORAGE_KEY);
-    if (!localLogsStr) return;
-
-    try {
-      const localLogs = JSON.parse(localLogsStr);
-      const logsToMigrate = [];
-
-      console.log('Scanning localStorage for local call history to migrate...');
-
-      for (const [localId, logsArray] of Object.entries(localLogs)) {
-        // Find local record matching this ID
-        const localVendor = initialVendors.find(v => String(v.id) === String(localId));
-        if (!localVendor) continue;
-
-        // Match local vendor to newly loaded cloud database vendor (by name or phone)
-        const dbVendor = dbVendors.find(dv => {
-          const localMobile = localVendor.contactPersonMobile || localVendor.mobile;
-          return dv.vendor_name === (localVendor.vendorName || localVendor.vendor_name) ||
-            (localMobile && dv.contact_person_mobile === localMobile);
-        });
-
-        if (!dbVendor) continue;
-
-        // Map logs
-        logsArray.forEach(log => {
-          logsToMigrate.push({
-            vendor_id: dbVendor.id,
-            timestamp: log.timestamp,
-            outcome: log.outcome,
-            note: log.note,
-            follow_up_date: log.followUpDate || null,
-            user_id: user.id
-          });
-        });
-      }
-
-      if (logsToMigrate.length > 0) {
-        console.log(`Migrating ${logsToMigrate.length} call logs from Local Storage to cloud database...`);
-        const { error } = await supabase.from('call_logs').insert(logsToMigrate);
-        if (error) throw error;
-        console.log('Cloud migration complete!');
-      }
-
-      // Safe clean up
-      localStorage.removeItem(LOGS_STORAGE_KEY);
-      localStorage.removeItem(STATUS_STORAGE_KEY);
-
-      // Re-fetch all data to load profiles, vendors, and call logs correctly in memory
-      await fetchData();
-      alert(`Data Sync Complete: Successfully uploaded ${logsToMigrate.length} local call logs to your cloud account!`);
-
-    } catch (err) {
-      console.error('Local Storage data migration failed:', err);
-    }
-  };
 
   // --- Helper to get Today's Date String in local format ---
   const getTodayString = () => {
@@ -3499,15 +3376,7 @@ function App() {
                       />
                     </label>
                     
-                    <button 
-                      onClick={() => seedDefaultVendors(true)}
-                      className="btn-primary" 
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '10px' }}
-                    >
-                      <RefreshCw size={16} /> Sync Local JSON Data
-                    </button>
-                    
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Syncs the database with your uploaded nikunj.json file.</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Upload and sync your crm database with an external JSON file in-place.</span>
                   </div>
                 </div>
 

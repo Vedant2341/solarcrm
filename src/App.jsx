@@ -2881,7 +2881,30 @@ function App() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Users size={12} style={{ color: 'var(--text-muted)' }} />
-                          <span>Contact: <strong>{vendor.contact_person_name || 'Not Listed'}</strong></span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            Contact: <strong>{vendor.contact_person_name || 'Not Listed'}</strong>
+                            {vendor.contact_person_name && (
+                              <a 
+                                href={`https://www.google.com/search?q=${encodeURIComponent((vendor.vendor_name || '') + ' ' + (vendor.contact_person_name || '') + ' owner linkedin')}`}
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                title="Search Owner LinkedIn on Google"
+                                style={{ 
+                                  color: '#0077B5', 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center',
+                                  opacity: 0.8,
+                                  transition: 'opacity 0.2s'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.32 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.79M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/>
+                                </svg>
+                              </a>
+                            )}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Phone size={12} style={{ color: 'var(--text-muted)' }} />
@@ -3727,6 +3750,37 @@ function App() {
                     ) : (
                       'Not Listed'
                     )}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>LinkedIn Search</span>
+                  <p style={{ marginTop: '4px' }}>
+                    <a 
+                      href={`https://www.google.com/search?q=${encodeURIComponent((selectedVendor.vendor_name || '') + ' ' + (selectedVendor.contact_person_name || '') + ' owner linkedin')}`}
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      style={{ 
+                        color: '#0077B5', 
+                        textDecoration: 'none', 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '6px',
+                        background: 'rgba(0, 119, 181, 0.08)',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        fontWeight: '600',
+                        fontSize: '0.8rem',
+                        transition: 'all 0.2s ease',
+                        border: '1px solid rgba(0, 119, 181, 0.2)'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 119, 181, 0.15)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(0, 119, 181, 0.08)'}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                        <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.32 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.79M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/>
+                      </svg>
+                      <span>Find on LinkedIn</span>
+                    </a>
                   </p>
                 </div>
               </div>

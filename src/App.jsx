@@ -771,6 +771,12 @@ function App() {
     const sorted = [...filteredVendors];
     
     sorted.sort((a, b) => {
+      if (sortBy === 'created_at') {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      }
+
       let valA = a[sortBy];
       let valB = b[sortBy];
 
@@ -2707,6 +2713,7 @@ function App() {
                     style={{ cursor: 'pointer', padding: '4px 12px', fontSize: '0.85rem', width: 'auto', height: '32px' }}
                   >
                     <option value="capacity_difference">Capacity Growth (Last 2 Syncs)</option>
+                    <option value="created_at">Registration Date (Date Added)</option>
                     <option value="nationwise_capacity">Nation-wise Capacity (kW)</option>
                     <option value="statewise_capacity">State-wide Capacity (kW)</option>
                     <option value="districtwise_capacity">District-wide Capacity (kW)</option>
@@ -2948,6 +2955,14 @@ function App() {
                             <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>📈 Capacity Growth:</span>
                             <span style={{ color: (vendor.capacity_difference || 0) > 0 ? '#10b981' : (vendor.capacity_difference || 0) < 0 ? '#ef4444' : 'var(--text-secondary)', fontWeight: '700' }}>
                               {(vendor.capacity_difference || 0) > 0 ? '+' : ''}{(vendor.capacity_difference || 0).toLocaleString()} kW
+                            </span>
+                          </div>
+                        )}
+                        {(sortBy === 'created_at' || vendor.created_at) && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', background: 'rgba(6, 182, 212, 0.05)', padding: '4px 8px', borderRadius: '4px', marginTop: '4px' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>📅 Date Added:</span>
+                            <span style={{ color: 'var(--accent-cyan)', fontWeight: '700' }}>
+                              {formatDateTime(vendor.created_at)}
                             </span>
                           </div>
                         )}

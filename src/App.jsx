@@ -186,6 +186,7 @@ function App() {
   const [usersList, setUsersList] = useState([]);
   const [editingUser, setEditingUser] = useState(null);
   const [newUserPasswordInput, setNewUserPasswordInput] = useState('');
+  const [selectedTimelineDate, setSelectedTimelineDate] = useState(null);
 
   // --- Profile Management & Role Checking ---
   const upsertProfile = async (sessionUser) => {
@@ -961,6 +962,36 @@ function App() {
     });
     return sorted.slice(0, 5);
   }, [vendors]);
+
+  const timelineGroupedVendors = useMemo(() => {
+    const groups = {};
+    mergedVendors.forEach(vendor => {
+      const dateStr = vendor.created_at ? vendor.created_at.split('T')[0] : 'Unknown';
+      if (!groups[dateStr]) {
+        groups[dateStr] = [];
+      }
+      groups[dateStr].push(vendor);
+    });
+
+    // Sort dates descending (newest dates first)
+    const sortedDates = Object.keys(groups).sort((a, b) => {
+      if (a === 'Unknown') return 1;
+      if (b === 'Unknown') return -1;
+      return new Date(b).getTime() - new Date(a).getTime();
+    });
+
+    return {
+      groups,
+      sortedDates
+    };
+  }, [mergedVendors]);
+
+  // Set default selected timeline date
+  useEffect(() => {
+    if (!selectedTimelineDate && timelineGroupedVendors.sortedDates.length > 0) {
+      setSelectedTimelineDate(timelineGroupedVendors.sortedDates[0]);
+    }
+  }, [timelineGroupedVendors, selectedTimelineDate]);
 
   const formatGrowthValue = (value) => {
     if (value > 0) return `+${value.toLocaleString()}`;
@@ -1927,6 +1958,13 @@ function App() {
           >
             <Users size={18} /> Directory ({filteredVendors.length})
           </button>
+
+          <button 
+            onClick={() => { setActiveTab('timeline'); setIsSidebarOpen(false); }} 
+            className={`nav-btn ${activeTab === 'timeline' ? 'active' : ''}`}
+          >
+            <Clock size={18} /> Daily Uploads
+          </button>
           
           <button 
             onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); }} 
@@ -2009,6 +2047,7 @@ function App() {
               <h1 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {activeTab === 'dashboard' && "Activity Dashboard"}
                 {activeTab === 'directory' && "Vendor Directory"}
+                {activeTab === 'timeline' && "Daily Uploads & Registrations"}
                 {activeTab === 'calendar' && "Follow-Up Calendar"}
                 {activeTab === 'democalendar' && "Demo Calendar"}
                 {activeTab === 'settings' && "Database Management"}
@@ -2187,12 +2226,18 @@ function App() {
 
                 {/* Card 2: Newly Registered Companies */}
                 <section className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', minHeight: '300px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                  <div 
+                    onClick={() => { setActiveTab('timeline'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', cursor: 'pointer' }}
+                    title="Click to view all registrations date-wise"
+                  >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <UserPlus style={{ color: 'var(--status-interested)' }} size={20} />
                       <h3 style={{ fontSize: '1.2rem', margin: 0 }}>Newly Registered Companies</h3>
                     </div>
-                    <span className="badge badge-interested" style={{ fontSize: '0.7rem' }}>LATEST LEADS</span>
+                    <span className="badge badge-interested" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      LATEST LEADS ➔
+                    </span>
                   </div>
 
                   {newlyRegisteredCompanies.length === 0 ? (
@@ -3019,6 +3064,161 @@ function App() {
                 </button>
               </section>
             )}
+
+          </div>
+        )}
+
+        {/* --- PANEL: DAILY REGISTRATIONS TIMELINE --- */}
+        {activeTab === 'timeline' && (
+          <div className="animate-fade-in timeline-layout">
+            
+            {/* Left Sidebar: Dates List */}
+            <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '75vh', overflowY: 'auto' }}>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}><Clock size={18} style={{ color: 'var(--accent-cyan)' }} /> Upload Dates</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Select an upload snapshot date to view registered vendors.</p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {timelineGroupedVendors.sortedDates.length === 0 ? (
+                  <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textAlign: 'center', padding: '20px 0' }}>No records found</span>
+                ) : (
+                  timelineGroupedVendors.sortedDates.map(dateKey => {
+                    const count = timelineGroupedVendors.groups[dateKey].length;
+                    const isSelected = selectedTimelineDate === dateKey;
+                    return (
+                      <button
+                        key={dateKey}
+                        onClick={() => setSelectedTimelineDate(dateKey)}
+                        className={`btn-secondary`}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '12px 16px',
+                          borderRadius: '10px',
+                          border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid var(--border-glass)',
+                          background: isSelected ? 'rgba(6, 182, 212, 0.08)' : 'rgba(255,255,255,0.01)',
+                          color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          fontWeight: isSelected ? '700' : '500',
+                          textAlign: 'left',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <span>{dateKey === 'Unknown' ? 'Unknown Date' : formatDateTime(dateKey)}</span>
+                        <span 
+                          className="badge" 
+                          style={{ 
+                            background: isSelected ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.05)', 
+                            color: isSelected ? 'black' : 'var(--text-primary)',
+                            fontWeight: '700',
+                            fontSize: '0.75rem',
+                            padding: '2px 8px',
+                            borderRadius: '20px'
+                          }}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Right Side: Lead Cards list for selected date */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div className="glass-panel" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>
+                    {selectedTimelineDate === 'Unknown' ? 'Unknown Date Registrations' : `Registrations on ${formatDateTime(selectedTimelineDate)}`}
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    Showing <strong>{(timelineGroupedVendors.groups[selectedTimelineDate] || []).length}</strong> solar companies registered on this day.
+                  </p>
+                </div>
+              </div>
+
+              {/* Vendors list grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+                {(!selectedTimelineDate || !(timelineGroupedVendors.groups[selectedTimelineDate] || []).length) ? (
+                  <div className="glass-panel" style={{ padding: '60px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)', gridColumn: '1 / -1' }}>
+                    Select a date from the timeline list to view leads.
+                  </div>
+                ) : (
+                  timelineGroupedVendors.groups[selectedTimelineDate].map(vendor => (
+                    <div 
+                      key={`timeline-vendor-${vendor.id}`} 
+                      className="glass-panel follow-up-item" 
+                      style={{ 
+                        padding: '20px', 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        gap: '12px',
+                        borderLeft: '4px solid var(--accent-cyan)',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: '800', fontSize: '1.1rem', color: 'var(--text-primary)' }}>{vendor.vendor_name}</span>
+                          {vendor.assignedName && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--accent-pink)', background: 'rgba(236, 72, 153, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500' }}>
+                              👤 {vendor.assignedName}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Details grid */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Users size={12} style={{ color: 'var(--text-muted)' }} />
+                            <span>Contact: <strong>{vendor.contact_person_name || 'Not Listed'}</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Phone size={12} style={{ color: 'var(--text-muted)' }} />
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              Phone: <strong>{vendor.contact_person_mobile || 'Not Listed'}</strong>
+                              {vendor.contact_person_mobile && (
+                                <a 
+                                  href={getWhatsAppUrl(vendor.contact_person_mobile)} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  title="Send WhatsApp Message"
+                                  className="whatsapp-icon-inline"
+                                >
+                                  <WhatsAppIcon size={12} />
+                                </a>
+                              )}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Sun size={12} style={{ color: 'var(--text-muted)' }} />
+                            <span>District Capacity: <strong style={{ color: 'var(--accent-cyan)' }}>{vendor.districtwise_capacity?.toLocaleString() || 0} kW</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '4px' }}>
+                            <MapPin size={12} style={{ color: 'var(--text-muted)', marginTop: '2px', flexShrink: 0 }} />
+                            <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontSize: '0.75rem', lineHeight: '1.3' }}>{vendor.address}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Call Action */}
+                      <div style={{ display: 'flex', borderTop: '1px solid var(--border-glass)', paddingTop: '10px', marginTop: '4px', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => handleOpenCallModal(vendor)} 
+                          className="btn-primary" 
+                          style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <Phone size={12} /> Call & Log
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
 
           </div>
         )}

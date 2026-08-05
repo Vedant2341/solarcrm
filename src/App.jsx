@@ -220,7 +220,7 @@ function App() {
           const lastSignInTime = new Date(sessionUser.last_sign_in_at).getTime();
 
           if (forceLogoutTime > lastSignInTime) {
-            handleLogout();
+            handleLogout(true);
             alert('Your session has been terminated because your password was changed. Please log in again.');
             return;
           }
@@ -265,7 +265,7 @@ function App() {
         // Verify user against Supabase Auth database to check if deleted/disabled
         const { data: { user: verifiedUser }, error } = await supabase.auth.getUser();
         if (error || !verifiedUser) {
-          handleLogout();
+          handleLogout(true);
           alert('Your session is invalid (user account may have been deleted or disabled). Please log in again.');
           return;
         }
@@ -336,7 +336,7 @@ function App() {
             const lastSignInTime = new Date(user.last_sign_in_at).getTime();
 
             if (forceLogoutTime > lastSignInTime) {
-              handleLogout();
+              handleLogout(true);
               alert('Your session has been terminated because your password was changed by an admin. Please log in again.');
             }
           }
@@ -1382,8 +1382,8 @@ function App() {
     }
   };
 
-  const handleLogout = async () => {
-    if (window.confirm('Are you sure you want to sign out?')) {
+  const handleLogout = async (force = false) => {
+    if (force || window.confirm('Are you sure you want to sign out?')) {
       setIsLoading(true);
       setActiveTab('dashboard');
       await supabase.auth.signOut();

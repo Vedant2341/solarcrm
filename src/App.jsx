@@ -260,12 +260,21 @@ function App() {
 
   // --- Auth Initialization ---
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      setIsAuthenticated(!!session);
-      if (u) {
-        upsertProfile(u);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        // Verify user against Supabase Auth database to check if deleted/disabled
+        const { data: { user: verifiedUser }, error } = await supabase.auth.getUser();
+        if (error || !verifiedUser) {
+          handleLogout();
+          alert('Your session is invalid (user account may have been deleted or disabled). Please log in again.');
+          return;
+        }
+        setUser(verifiedUser);
+        setIsAuthenticated(true);
+        upsertProfile(verifiedUser);
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
       }
     });
 

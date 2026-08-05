@@ -1480,6 +1480,32 @@ function App() {
     }
   };
 
+  const handleAdminDeleteUser = async (userId, userName) => {
+    if (userId === user.id) {
+      alert('You cannot delete your own account!');
+      return;
+    }
+    const confirmDelete = window.confirm(`Are you sure you want to permanently delete user "${userName}"? This will log them out immediately and delete their account.`);
+    if (!confirmDelete) return;
+
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.rpc('admin_delete_user', {
+        user_uuid: userId
+      });
+
+      if (error) throw error;
+
+      alert(`User "${userName}" has been successfully deleted.`);
+      await fetchUsersList();
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to delete user: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // --- CRM Interaction Handlers ---
   const handleOpenCallModal = (vendor) => {
     setSelectedVendor(vendor);
@@ -3824,7 +3850,7 @@ function App() {
                               {usr.role}
                             </span>
                           </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <td style={{ padding: '12px 16px', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                             <button
                               onClick={() => {
                                 setEditingUser(usr);
@@ -3834,6 +3860,22 @@ function App() {
                               style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '6px' }}
                             >
                               Reset Password
+                            </button>
+                            <button
+                              onClick={() => handleAdminDeleteUser(usr.id, usr.name)}
+                              className="btn-secondary"
+                              style={{ 
+                                padding: '4px 10px', 
+                                fontSize: '0.75rem', 
+                                borderRadius: '6px', 
+                                color: usr.id === user.id ? 'var(--text-muted)' : 'var(--status-uninterested)', 
+                                borderColor: usr.id === user.id ? 'var(--border-glass)' : 'rgba(239, 68, 68, 0.2)',
+                                cursor: usr.id === user.id ? 'not-allowed' : 'pointer'
+                              }}
+                              disabled={usr.id === user.id}
+                              title={usr.id === user.id ? "You cannot delete your own account" : `Delete ${usr.name}`}
+                            >
+                              Delete
                             </button>
                           </td>
                         </tr>

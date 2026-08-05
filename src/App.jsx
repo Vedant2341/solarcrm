@@ -214,6 +214,18 @@ function App() {
           });
         if (insertError) throw insertError;
       } else {
+        // Force logout if password changed after last sign-in
+        if (profile.force_logout_at) {
+          const forceLogoutTime = new Date(profile.force_logout_at).getTime();
+          const lastSignInTime = new Date(sessionUser.last_sign_in_at).getTime();
+
+          if (forceLogoutTime > lastSignInTime) {
+            handleLogout();
+            alert('Your session has been terminated because your password was changed. Please log in again.');
+            return;
+          }
+        }
+
         currentRole = profile.role;
         // Keep profile in sync
         if (profile.name !== name || profile.email !== sessionUser.email) {
@@ -294,6 +306,39 @@ function App() {
       setActiveTab('dashboard');
     }
   }, [userRole, user, activeTab]);
+
+  // --- Realtime Profile Listener for Force Logout on Password Change ---
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`profile-force-logout-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`
+        },
+        (payload) => {
+          if (payload.new && payload.new.force_logout_at) {
+            const forceLogoutTime = new Date(payload.new.force_logout_at).getTime();
+            const lastSignInTime = new Date(user.last_sign_in_at).getTime();
+
+            if (forceLogoutTime > lastSignInTime) {
+              handleLogout();
+              alert('Your session has been terminated because your password was changed by an admin. Please log in again.');
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const fetchAllFromTable = async (tableName, selectQuery, orderByField, ascending = true) => {
     let allData = [];

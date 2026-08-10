@@ -802,13 +802,49 @@ function App() {
       }
       const loc = getVendorLocation(vendor.address);
 
-      // Compute capacity difference between last two syncs
-      const latestCap = latestCapMap[vendor.id] !== undefined ? latestCapMap[vendor.id] : (parseFloat(vendor.nationwise_capacity) || 0);
-      const prevCap = prevCapMap[vendor.id] !== undefined ? prevCapMap[vendor.id] : 0;
+      // Compute capacity difference between last two syncs with forward-carry historical fallback
+      const getCapOnDate = (dateStr, fallbackCap) => {
+        if (!dateStr) return fallbackCap;
+        
+        // Exact lookup in date maps first
+        if (dateStr === latestDate && latestCapMap[vendor.id] !== undefined) return latestCapMap[vendor.id];
+        if (dateStr === prevDate && prevCapMap[vendor.id] !== undefined) return prevCapMap[vendor.id];
+        if (dateStr === baselineDate30Days && baseline30DaysCapMap[vendor.id] !== undefined) return baseline30DaysCapMap[vendor.id];
+
+        // Filter snapshots for this vendor to find closest prior capacity
+        const vSnaps = snapshots.filter(s => s.vendor_id === vendor.id);
+        if (vSnaps.length === 0) return fallbackCap;
+
+        // Exact date lookup in snapshots
+        const exact = vSnaps.find(s => s.snapshot_date === dateStr);
+        if (exact) return parseFloat(exact.nationwise_capacity) || 0;
+
+        // Most recent snapshot before dateStr
+        const tTime = new Date(dateStr).getTime();
+        let closest = null;
+        let maxTime = -Infinity;
+        vSnaps.forEach(s => {
+          const sTime = new Date(s.snapshot_date).getTime();
+          if (sTime <= tTime) {
+            if (sTime > maxTime) {
+              maxTime = sTime;
+              closest = s;
+            }
+          }
+        });
+
+        if (closest) return parseFloat(closest.nationwise_capacity) || 0;
+
+        // If all snapshots are after dateStr, the vendor was added later, capacity was 0 before
+        return 0;
+      };
+
+      const latestCap = getCapOnDate(latestDate, parseFloat(vendor.nationwise_capacity) || 0);
+      const prevCap = getCapOnDate(prevDate, latestCap);
       const capacityDiff = latestCap - prevCap;
 
       // Compute capacity difference for last 30 days
-      const baselineCap30 = baseline30DaysCapMap[vendor.id] !== undefined ? baseline30DaysCapMap[vendor.id] : 0;
+      const baselineCap30 = getCapOnDate(baselineDate30Days, latestCap);
       const capacityDiff30 = latestCap - baselineCap30;
 
       return {

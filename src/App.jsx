@@ -387,9 +387,107 @@ function App() {
     return allData;
   };
 
-  const fetchData = async () => {
+  const CACHE_KEYS = {
+    VENDORS: 'solar_crm_cached_vendors',
+    CALL_LOGS: 'solar_crm_cached_call_logs',
+    SNAPSHOTS: 'solar_crm_cached_snapshots',
+    PROFILES: 'solar_crm_cached_profiles',
+    DATES: 'solar_crm_cached_dates',
+    METADATA: 'solar_crm_cached_metadata'
+  };
+
+  const fetchData = async (forceRefresh = false) => {
     setIsLoading(true);
     try {
+      const todayStr = getTodayString();
+      
+      // Get cached metadata
+      const cachedMetaStr = localStorage.getItem(CACHE_KEYS.METADATA);
+      let cachedMeta = null;
+      if (cachedMetaStr) {
+        try {
+          cachedMeta = JSON.parse(cachedMetaStr);
+        } catch (e) {
+          console.error('Failed to parse cached metadata:', e);
+        }
+      }
+
+      // Check if we should perform lightweight cache check
+      const hasLocalCache = !forceRefresh && 
+                            cachedMeta && 
+                            cachedMeta.userId === user?.id && 
+                            cachedMeta.date === todayStr;
+
+      let useCache = false;
+      let dbVendorCount = 0;
+      let dbLatestSnapDate = null;
+
+      if (hasLocalCache) {
+        try {
+          // Quick lightweight queries to check for changes
+          const { count } = await supabase
+            .from('vendors')
+            .select('*', { count: 'exact', head: true });
+          dbVendorCount = count || 0;
+
+          const { data: snapData } = await supabase
+            .from('vendor_snapshots')
+            .select('snapshot_date')
+            .order('snapshot_date', { ascending: false })
+            .limit(1);
+          dbLatestSnapDate = snapData?.[0]?.snapshot_date || null;
+
+          if (dbVendorCount === cachedMeta.vendorCount && dbLatestSnapDate === cachedMeta.latestSnapDate) {
+            useCache = true;
+          }
+        } catch (e) {
+          console.warn('Lightweight metadata check failed, falling back to full fetch:', e);
+        }
+      }
+
+      if (useCache) {
+        // Cache hit! Load all data from localStorage
+        const cachedVendors = JSON.parse(localStorage.getItem(CACHE_KEYS.VENDORS) || '[]');
+        const cachedCallLogs = JSON.parse(localStorage.getItem(CACHE_KEYS.CALL_LOGS) || '{}');
+        const cachedSnapshots = JSON.parse(localStorage.getItem(CACHE_KEYS.SNAPSHOTS) || '[]');
+        const cachedProfiles = JSON.parse(localStorage.getItem(CACHE_KEYS.PROFILES) || '[]');
+        const cachedDates = JSON.parse(localStorage.getItem(CACHE_KEYS.DATES) || '[]');
+
+        setVendors(cachedVendors);
+        setCallLogs(cachedCallLogs);
+        
+        // Populate vendor statuses mapping from call logs
+        const statusesMap = {};
+        Object.keys(cachedCallLogs).forEach(vId => {
+          const vLogs = cachedCallLogs[vId] || [];
+          if (vLogs.length > 0) {
+            statusesMap[vId] = vLogs[0].outcome;
+          }
+        });
+        setVendorStatuses(statusesMap);
+        
+        setSnapshots(cachedSnapshots);
+        setAvailableDates(cachedDates);
+
+        // Setup default growth dates
+        if (cachedDates.length >= 2) {
+          setGrowthStartDate(cachedDates[1]);
+          setGrowthEndDate(cachedDates[0]);
+        } else if (cachedDates.length === 1) {
+          setGrowthStartDate(cachedDates[0]);
+          setGrowthEndDate(cachedDates[0]);
+        }
+
+        if (userRole === 'admin' || user?.email?.toLowerCase() === 'vedant@vijapur.in') {
+          setUsersList(cachedProfiles);
+        }
+        
+        console.log('Cache hit! Loaded data instantly from localStorage.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Cache miss! Run full queries
       // 1. Fetch all User Profiles
       const dbProfiles = await fetchAllFromTable('profiles', '*', 'id', true);
       const profilesMap = {};
@@ -399,10 +497,6 @@ function App() {
 
       // 2. Fetch all Vendors
       const dbVendors = await fetchAllFromTable('vendors', '*', 'id', true);
-
-
-
-      // Map profiles to vendors in memory
       const vendorsWithProfiles = dbVendors.map(vendor => {
         const profile = vendor.assigned_to ? profilesMap[vendor.assigned_to] : null;
         return {
@@ -414,8 +508,6 @@ function App() {
 
       // 3. Fetch all Call Logs
       const dbLogs = await fetchAllFromTable('call_logs', '*', 'timestamp', false);
-
-      // Compile logs into Map: { [vendorId]: [logs] } and extract latest status
       const logsMap = {};
       const statusesMap = {};
 
@@ -434,7 +526,6 @@ function App() {
           userName: logProfile?.name || logProfile?.email?.split('@')[0] || 'Unknown User'
         });
 
-        // The logs are ordered descending, so the first match we encounter is the latest status
         if (!statusesMap[log.vendor_id]) {
           statusesMap[log.vendor_id] = log.outcome;
         }
@@ -464,7 +555,31 @@ function App() {
         await fetchUsersList();
       }
 
+      // Populate Cache
+      const { count: freshCount } = await supabase
+        .from('vendors')
+        .select('*', { count: 'exact', head: true });
+      
+      const { data: freshSnapData } = await supabase
+        .from('vendor_snapshots')
+        .select('snapshot_date')
+        .order('snapshot_date', { ascending: false })
+        .limit(1);
+      const freshLatestSnap = freshSnapData?.[0]?.snapshot_date || null;
 
+      localStorage.setItem(CACHE_KEYS.VENDORS, JSON.stringify(vendorsWithProfiles));
+      localStorage.setItem(CACHE_KEYS.CALL_LOGS, JSON.stringify(logsMap));
+      localStorage.setItem(CACHE_KEYS.SNAPSHOTS, JSON.stringify(dbSnapshots));
+      localStorage.setItem(CACHE_KEYS.PROFILES, JSON.stringify(dbProfiles));
+      localStorage.setItem(CACHE_KEYS.DATES, JSON.stringify(uniqueDates));
+      localStorage.setItem(CACHE_KEYS.METADATA, JSON.stringify({
+        userId: user?.id,
+        date: todayStr,
+        vendorCount: freshCount || 0,
+        latestSnapDate: freshLatestSnap
+      }));
+
+      console.log('Cache populated/updated with fresh database snapshots.');
 
     } catch (err) {
       console.error('Error fetching Supabase data:', err);
@@ -1686,7 +1801,7 @@ function App() {
       setAutoDateDetected('');
       
       // Refresh database records
-      await fetchData();
+      await fetchData(true);
     } catch (err) {
       console.error(err);
       alert('Failed to save call log to database.');
@@ -1706,7 +1821,7 @@ function App() {
 
       if (error) throw error;
       setSelectedVendor(null);
-      await fetchData();
+      await fetchData(true);
     } catch (err) {
       console.error(err);
       alert('Failed to delete log entry.');
@@ -1767,7 +1882,7 @@ function App() {
         alert(`Import complete!\nSync details: ${insertedCount} new vendors added, ${updatedCount} existing vendors updated, and ${skippedCount} unchanged vendors were skipped.`);
 
         setCurrentPage(1);
-        await fetchData();
+        await fetchData(true);
       } catch (err) {
         console.error(err);
         alert(err.message || 'Failed to import JSON data. Ensure the JSON file is valid.');
@@ -2041,7 +2156,7 @@ function App() {
             const { error } = await supabase.from('call_logs').insert(logsToInsert);
             if (error) throw error;
             alert('Import completed successfully!');
-            await fetchData();
+            await fetchData(true);
           }
         } else {
           alert('No matching vendors found to apply these logs.');

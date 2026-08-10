@@ -744,16 +744,46 @@ function App() {
     const latestDate = availableDates[0] || null;
     const prevDate = availableDates[1] || null;
 
+    // Find baseline date closest to 30 days before latestDate
+    let baselineDate30Days = null;
+    if (latestDate && availableDates.length > 0) {
+      const latestDateObj = new Date(latestDate);
+      const targetDateObj = new Date(latestDateObj.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      let minDiff = Infinity;
+      availableDates.forEach(dateStr => {
+        const dateObj = new Date(dateStr);
+        const diff = Math.abs(dateObj.getTime() - targetDateObj.getTime());
+        const ageDiff = latestDateObj.getTime() - dateObj.getTime();
+        if (ageDiff >= 15 * 24 * 60 * 60 * 1000) {
+          if (diff < minDiff) {
+            minDiff = diff;
+            baselineDate30Days = dateStr;
+          }
+        }
+      });
+
+      // Fallback
+      if (!baselineDate30Days && availableDates.length > 1) {
+        baselineDate30Days = availableDates[availableDates.length - 1];
+      }
+    }
+
     // Create lookup maps for performance
     const latestCapMap = {};
     const prevCapMap = {};
+    const baseline30DaysCapMap = {};
 
-    if (latestDate && prevDate && snapshots.length > 0) {
+    if (snapshots.length > 0) {
       snapshots.forEach(s => {
-        if (s.snapshot_date === latestDate) {
+        if (latestDate && s.snapshot_date === latestDate) {
           latestCapMap[s.vendor_id] = parseFloat(s.nationwise_capacity) || 0;
-        } else if (s.snapshot_date === prevDate) {
+        }
+        if (prevDate && s.snapshot_date === prevDate) {
           prevCapMap[s.vendor_id] = parseFloat(s.nationwise_capacity) || 0;
+        }
+        if (baselineDate30Days && s.snapshot_date === baselineDate30Days) {
+          baseline30DaysCapMap[s.vendor_id] = parseFloat(s.nationwise_capacity) || 0;
         }
       });
     }
@@ -777,6 +807,10 @@ function App() {
       const prevCap = prevCapMap[vendor.id] !== undefined ? prevCapMap[vendor.id] : 0;
       const capacityDiff = latestCap - prevCap;
 
+      // Compute capacity difference for last 30 days
+      const baselineCap30 = baseline30DaysCapMap[vendor.id] !== undefined ? baseline30DaysCapMap[vendor.id] : 0;
+      const capacityDiff30 = latestCap - baselineCap30;
+
       return {
         ...vendor,
         status,
@@ -785,7 +819,8 @@ function App() {
         assignedName: vendor.profiles?.name || vendor.profiles?.email?.split('@')[0] || null,
         state: loc.state,
         district: loc.district,
-        capacity_difference: capacityDiff
+        capacity_difference: capacityDiff,
+        capacity_difference_30: capacityDiff30
       };
     });
   }, [vendors, callLogs, vendorStatuses, availableDates, snapshots]);
@@ -2913,6 +2948,7 @@ function App() {
                     style={{ cursor: 'pointer', padding: '4px 12px', fontSize: '0.85rem', width: 'auto', height: '32px' }}
                   >
                     <option value="capacity_difference">Capacity Growth (Last 2 Syncs)</option>
+                    <option value="capacity_difference_30">Capacity Growth (Last 30 Days)</option>
                     <option value="created_at">Registration Date (Date Added)</option>
                     <option value="nationwise_capacity">Nation-wise Capacity (kW)</option>
                     <option value="statewise_capacity">State-wide Capacity (kW)</option>
@@ -3152,9 +3188,17 @@ function App() {
                         </div>
                         {(sortBy === 'capacity_difference' || (vendor.capacity_difference !== undefined && vendor.capacity_difference !== 0)) && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', background: 'rgba(16, 185, 129, 0.05)', padding: '4px 8px', borderRadius: '4px', marginTop: '4px' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>📈 Capacity Growth:</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>📈 Growth (Last 2 Syncs):</span>
                             <span style={{ color: (vendor.capacity_difference || 0) > 0 ? '#10b981' : (vendor.capacity_difference || 0) < 0 ? '#ef4444' : 'var(--text-secondary)', fontWeight: '700' }}>
                               {(vendor.capacity_difference || 0) > 0 ? '+' : ''}{(vendor.capacity_difference || 0).toLocaleString()} kW
+                            </span>
+                          </div>
+                        )}
+                        {(sortBy === 'capacity_difference_30' || (vendor.capacity_difference_30 !== undefined && vendor.capacity_difference_30 !== 0)) && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', background: 'rgba(16, 185, 129, 0.05)', padding: '4px 8px', borderRadius: '4px', marginTop: '4px' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>📈 Growth (30 Days):</span>
+                            <span style={{ color: (vendor.capacity_difference_30 || 0) > 0 ? '#10b981' : (vendor.capacity_difference_30 || 0) < 0 ? '#ef4444' : 'var(--text-secondary)', fontWeight: '700' }}>
+                              {(vendor.capacity_difference_30 || 0) > 0 ? '+' : ''}{(vendor.capacity_difference_30 || 0).toLocaleString()} kW
                             </span>
                           </div>
                         )}

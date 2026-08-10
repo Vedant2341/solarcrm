@@ -33,7 +33,8 @@ import {
   Menu,
   TrendingUp,
   UserPlus,
-  Video
+  Video,
+  BookOpen
 } from 'lucide-react';
 
 // Storage keys for migration fallback
@@ -187,6 +188,8 @@ function App() {
   const [editingUser, setEditingUser] = useState(null);
   const [newUserPasswordInput, setNewUserPasswordInput] = useState('');
   const [selectedTimelineDate, setSelectedTimelineDate] = useState(null);
+  const [ledgerSearchQuery, setLedgerSearchQuery] = useState('');
+  const [selectedLedgerVendor, setSelectedLedgerVendor] = useState(null);
 
   // --- Profile Management & Role Checking ---
   const upsertProfile = async (sessionUser) => {
@@ -1046,6 +1049,70 @@ function App() {
       setSelectedTimelineDate(timelineGroupedVendors.sortedDates[0]);
     }
   }, [timelineGroupedVendors, selectedTimelineDate]);
+
+  // --- Company Ledger Search & Suggestions ---
+  const ledgerSuggestions = useMemo(() => {
+    if (!ledgerSearchQuery.trim()) return [];
+    const query = ledgerSearchQuery.toLowerCase();
+    return mergedVendors.filter(v => 
+      v.vendor_name?.toLowerCase().includes(query)
+    ).slice(0, 10);
+  }, [ledgerSearchQuery, mergedVendors]);
+
+  // --- Company Ledger Data & 30-Day Capacity Change Calculation ---
+  const ledgerVendorData = useMemo(() => {
+    if (!selectedLedgerVendor) return null;
+
+    // 1. Get call logs
+    const logs = callLogs[selectedLedgerVendor.id] || [];
+    const sortedLogs = [...logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // 2. Get snapshots
+    const snaps = snapshots.filter(s => s.vendor_id === selectedLedgerVendor.id);
+    const sortedSnaps = [...snaps].sort((a, b) => new Date(a.snapshot_date) - new Date(b.snapshot_date));
+
+    // 3. Calculate 30 days capacity change
+    let change30Days = 0;
+    let baselineSnap = null;
+
+    if (sortedSnaps.length > 0) {
+      const latestSnap = sortedSnaps[sortedSnaps.length - 1];
+      const latestDate = new Date(latestSnap.snapshot_date);
+      const targetDate = new Date(latestDate.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+
+      let minDiff = Infinity;
+      sortedSnaps.forEach(snap => {
+        const snapDate = new Date(snap.snapshot_date);
+        const diff = Math.abs(snapDate.getTime() - targetDate.getTime());
+        // Require baseline to be at least 15 days older than the latest snapshot
+        const ageDiff = latestDate.getTime() - snapDate.getTime();
+        if (ageDiff >= 15 * 24 * 60 * 60 * 1000) {
+          if (diff < minDiff) {
+            minDiff = diff;
+            baselineSnap = snap;
+          }
+        }
+      });
+
+      // Fallback: use earliest snapshot if no snapshot is 15+ days older
+      if (!baselineSnap && sortedSnaps.length > 1) {
+        baselineSnap = sortedSnaps[0];
+      }
+
+      if (baselineSnap) {
+        const capLatest = parseFloat(latestSnap.nationwise_capacity) || 0;
+        const capBaseline = parseFloat(baselineSnap.nationwise_capacity) || 0;
+        change30Days = capLatest - capBaseline;
+      }
+    }
+
+    return {
+      logs: sortedLogs,
+      snapshots: sortedSnaps.reverse(), // Newest snapshots first in timeline
+      change30Days,
+      baselineDate: baselineSnap ? baselineSnap.snapshot_date : null
+    };
+  }, [selectedLedgerVendor, callLogs, snapshots]);
 
   const formatGrowthValue = (value) => {
     if (value > 0) return `+${value.toLocaleString()}`;
@@ -2045,6 +2112,13 @@ function App() {
           >
             <Clock size={18} /> Daily Uploads
           </button>
+
+          <button 
+            onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} 
+            className={`nav-btn ${activeTab === 'ledger' ? 'active' : ''}`}
+          >
+            <BookOpen size={18} /> Company Ledger
+          </button>
           
           <button 
             onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); }} 
@@ -2128,6 +2202,7 @@ function App() {
                 {activeTab === 'dashboard' && "Activity Dashboard"}
                 {activeTab === 'directory' && "Vendor Directory"}
                 {activeTab === 'timeline' && "Daily Uploads & Registrations"}
+                {activeTab === 'ledger' && "Company Ledger & Activity"}
                 {activeTab === 'calendar' && "Follow-Up Calendar"}
                 {activeTab === 'democalendar' && "Demo Calendar"}
                 {activeTab === 'settings' && "Database Management"}
@@ -3299,6 +3374,395 @@ function App() {
                 )}
               </div>
             </div>
+
+          </div>
+        )}
+
+        {/* --- PANEL: COMPANY LEDGER & ACTIVITY --- */}
+        {activeTab === 'ledger' && (
+          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            
+            {/* Search Card */}
+            <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '15px', position: 'relative' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: '800' }}>Search Company Ledger</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Lookup any solar developer to audit their complete history, log timelines, and capacity changes.</p>
+                </div>
+                {selectedLedgerVendor && (
+                  <button 
+                    onClick={() => {
+                      setSelectedLedgerVendor(null);
+                      setLedgerSearchQuery('');
+                    }}
+                    className="btn-secondary"
+                    style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '8px' }}
+                  >
+                    Clear Selection
+                  </button>
+                )}
+              </div>
+
+              {/* Autocomplete Input Container */}
+              <div style={{ position: 'relative', width: '100%', maxWidth: '500px' }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Search size={18} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    value={ledgerSearchQuery}
+                    onChange={(e) => {
+                      setLedgerSearchQuery(e.target.value);
+                      if (selectedLedgerVendor && e.target.value !== selectedLedgerVendor.vendor_name) {
+                        setSelectedLedgerVendor(null);
+                      }
+                    }}
+                    placeholder="Type solar company name..."
+                    className="input-field"
+                    style={{ paddingLeft: '40px', fontSize: '0.9rem', width: '100%' }}
+                  />
+                  {ledgerSearchQuery && (
+                    <button 
+                      onClick={() => setLedgerSearchQuery('')}
+                      style={{ position: 'absolute', right: '12px', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer' }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Suggestions List Dropdown */}
+                {ledgerSuggestions.length > 0 && !selectedLedgerVendor && (
+                  <div 
+                    className="glass-panel" 
+                    style={{ 
+                      position: 'absolute', 
+                      top: '105%', 
+                      left: 0, 
+                      right: 0, 
+                      zIndex: 100, 
+                      maxHeight: '260px', 
+                      overflowY: 'auto', 
+                      padding: '8px', 
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+                      background: 'rgba(15, 23, 42, 0.95)',
+                      border: '1px solid var(--border-glass)'
+                    }}
+                  >
+                    {ledgerSuggestions.map(vendor => (
+                      <button
+                        key={vendor.id}
+                        onClick={() => {
+                          setSelectedLedgerVendor(vendor);
+                          setLedgerSearchQuery(vendor.vendor_name);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 14px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: '8px',
+                          color: 'var(--text-primary)',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          transition: 'background 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <span style={{ fontWeight: '600' }}>{vendor.vendor_name}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{vendor.district}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Selected Ledger Report */}
+            {!selectedLedgerVendor ? (
+              <div className="glass-panel" style={{ padding: '60px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '15px', minHeight: '300px', color: 'var(--text-muted)' }}>
+                <BookOpen size={48} style={{ color: 'rgba(255, 255, 255, 0.1)', marginBottom: '10px' }} />
+                <h4 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-secondary)' }}>No Company Selected</h4>
+                <p style={{ fontSize: '0.85rem', maxWidth: '380px', textAlign: 'center', lineHeight: '1.4' }}>Use the search box above to select a solar developer and load their detailed activity ledger, call logs, and capacity snapshot comparison.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* 30-Day Change and Metrics Summary Panel */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                  
+                  {/* Card 1: 30-Day Capacity Change (ON TOP) */}
+                  <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: '600' }}>Last 30 Days Capacity Growth</span>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                      <span style={{ 
+                        fontSize: '1.8rem', 
+                        fontWeight: '800', 
+                        color: ledgerVendorData.change30Days > 0 ? '#10b981' : ledgerVendorData.change30Days < 0 ? '#ef4444' : 'var(--text-muted)' 
+                      }}>
+                        {ledgerVendorData.change30Days > 0 ? '+' : ''}{ledgerVendorData.change30Days.toLocaleString()} kW
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {ledgerVendorData.baselineDate 
+                        ? `Growth compared to baseline snapshot from ${formatDateTime(ledgerVendorData.baselineDate)}` 
+                        : 'No historical 30-day baseline snapshot found'}
+                    </span>
+                  </div>
+
+                  {/* Card 2: Current Capacity */}
+                  <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: '600' }}>Current Total Capacity</span>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                      <span style={{ fontSize: '1.8rem', fontWeight: '800', color: 'var(--accent-cyan)' }}>
+                        {(selectedLedgerVendor.nationwise_capacity || 0).toLocaleString()} kW
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Nation-wide installations: {selectedLedgerVendor.nationwise_installs || 0} setups
+                    </span>
+                  </div>
+
+                  {/* Card 3: Total Logs */}
+                  <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: '600' }}>Total Calls Logged</span>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                      <span style={{ fontSize: '1.8rem', fontWeight: '800', color: 'var(--status-interested)' }}>
+                        {ledgerVendorData.logs.length}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      All time documented interactions
+                    </span>
+                  </div>
+
+                  {/* Card 4: Pipeline Status */}
+                  <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '4px' }}>Lead Pipeline Status</span>
+                    <div>
+                      <span className={`badge badge-${selectedLedgerVendor.status.toLowerCase().replace(' ', '')}`} style={{ fontSize: '0.85rem', padding: '6px 14px', borderRadius: '6px', fontWeight: '700' }}>
+                        {selectedLedgerVendor.status}
+                      </span>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Main Two-Column Info Layout */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) 1fr', gap: '20px', alignItems: 'start' }}>
+                  
+                  {/* Left Column: Vendor profile */}
+                  <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div>
+                      <h4 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>{selectedLedgerVendor.vendor_name}</h4>
+                      {selectedLedgerVendor.assignedName && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent-pink)', background: 'rgba(236, 72, 153, 0.08)', padding: '2px 8px', borderRadius: '4px', fontWeight: '500', marginTop: '6px', display: 'inline-block' }}>
+                          👤 Assigned to: {selectedLedgerVendor.assignedName}
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem', borderTop: '1px solid var(--border-glass)', paddingTop: '15px' }}>
+                      
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem', marginBottom: '2px' }}>Contact Person</span>
+                        <span style={{ fontWeight: '600' }}>{selectedLedgerVendor.contact_person_name || 'Not Listed'}</span>
+                      </div>
+
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem', marginBottom: '4px' }}>Mobile Number</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <a 
+                            href={selectedLedgerVendor.contact_person_mobile ? `tel:${selectedLedgerVendor.contact_person_mobile}` : '#'} 
+                            onClick={(e) => !selectedLedgerVendor.contact_person_mobile && e.preventDefault()}
+                            style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '6px', 
+                              color: 'inherit', 
+                              textDecoration: 'none', 
+                              background: 'rgba(255, 255, 255, 0.04)', 
+                              padding: '5px 10px', 
+                              borderRadius: '6px', 
+                              border: '1px solid var(--border-glass)',
+                              fontWeight: '600',
+                              fontSize: '0.8rem'
+                            }}
+                          >
+                            <Phone size={12} style={{ color: 'var(--accent-cyan)' }} />
+                            <span>{selectedLedgerVendor.contact_person_mobile || 'Not Listed'}</span>
+                          </a>
+                          {selectedLedgerVendor.contact_person_mobile && (
+                            <a 
+                              href={getWhatsAppUrl(selectedLedgerVendor.contact_person_mobile)} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="btn-secondary whatsapp-btn"
+                              style={{ padding: '6px', borderRadius: '6px', display: 'inline-flex', color: '#25D366', background: 'rgba(37, 211, 102, 0.08)', border: '1px solid rgba(37, 211, 102, 0.2)' }}
+                            >
+                              <WhatsAppIcon size={12} />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem', marginBottom: '2px' }}>Email Address</span>
+                        <span style={{ fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', display: 'block' }}>{selectedLedgerVendor.contact_person_email || 'Not Listed'}</span>
+                      </div>
+
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem', marginBottom: '2px' }}>Website URL</span>
+                        {selectedLedgerVendor.website_url ? (
+                          <a href={selectedLedgerVendor.website_url.startsWith('http') ? selectedLedgerVendor.website_url : `https://${selectedLedgerVendor.website_url}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            {selectedLedgerVendor.website_url} <Globe size={11} />
+                          </a>
+                        ) : (
+                          <span style={{ fontWeight: '600' }}>Not Listed</span>
+                        )}
+                      </div>
+
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem', marginBottom: '2px' }}>Address</span>
+                        <span style={{ color: 'var(--text-secondary)', lineHeight: '1.4' }}>{selectedLedgerVendor.address}</span>
+                      </div>
+
+                    </div>
+
+                    <button 
+                      onClick={() => handleOpenCallModal(selectedLedgerVendor)} 
+                      className="btn-primary" 
+                      style={{ padding: '10px 16px', borderRadius: '10px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center', width: '100%', marginTop: '10px' }}
+                    >
+                      <Phone size={14} /> Call & Log Update
+                    </button>
+                  </div>
+
+                  {/* Right Column: Timelines */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    
+                    {/* Interaction Timeline */}
+                    <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      <h4 style={{ fontSize: '1.1rem', fontWeight: '800', borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Clock size={16} style={{ color: 'var(--accent-cyan)' }} /> Interaction History Ledger
+                      </h4>
+
+                      {ledgerVendorData.logs.length === 0 ? (
+                        <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                          No calls or status logs found for this company.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative', paddingLeft: '20px', borderLeft: '2px solid var(--border-glass)', marginLeft: '10px', marginTop: '10px' }}>
+                          {ledgerVendorData.logs.map((log, index) => (
+                            <div key={`log-${index}`} style={{ position: 'relative' }}>
+                              {/* Timeline Point */}
+                              <div style={{ 
+                                position: 'absolute', 
+                                left: '-27px', 
+                                top: '4px', 
+                                width: '12px', 
+                                height: '12px', 
+                                borderRadius: '50%', 
+                                background: 'var(--status-interested)', 
+                                border: '3px solid var(--bg-dark)' 
+                              }} />
+                              
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                  <span className={`badge badge-${log.outcome.toLowerCase().replace(' ', '')}`} style={{ fontSize: '0.7rem' }}>
+                                    {log.outcome}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    {new Date(log.timestamp).toLocaleString('default', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '4px', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', fontStyle: 'italic' }}>
+                                  "{log.note}"
+                                </p>
+                                {log.callerName && (
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', alignSelf: 'flex-end', marginTop: '2px' }}>
+                                    👤 Logged by {log.callerName}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Snapshot History Table/Timeline */}
+                    <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      <h4 style={{ fontSize: '1.1rem', fontWeight: '800', borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <TrendingUp size={16} style={{ color: 'var(--accent-cyan)' }} /> Capacity Snapshot History
+                      </h4>
+
+                      {ledgerVendorData.snapshots.length === 0 ? (
+                        <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                          No snapshots captured for this company. Snapshots are recorded when databases are synchronized.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {ledgerVendorData.snapshots.map((snap, index) => {
+                            // Calculate change from previous snapshot in array if exists
+                            let diff = 0;
+                            if (index < ledgerVendorData.snapshots.length - 1) {
+                              const prev = ledgerVendorData.snapshots[index + 1];
+                              diff = (parseFloat(snap.nationwise_capacity) || 0) - (parseFloat(prev.nationwise_capacity) || 0);
+                            }
+                            return (
+                              <div 
+                                key={`snap-${index}`} 
+                                style={{ 
+                                  display: 'flex', 
+                                  justifyContent: 'space-between', 
+                                  alignItems: 'center', 
+                                  padding: '12px 16px', 
+                                  background: 'rgba(255,255,255,0.01)', 
+                                  border: '1px solid var(--border-glass)', 
+                                  borderRadius: '8px',
+                                  flexWrap: 'wrap',
+                                  gap: '10px'
+                                }}
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                  <span style={{ fontWeight: '700', fontSize: '0.85rem' }}>{formatDateTime(snap.snapshot_date)}</span>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    🌎 Nation: {snap.nationwise_capacity?.toLocaleString()} kW ({snap.nationwise_installs || 0} installs)
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                                  <span style={{ fontWeight: '600', fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>
+                                    {snap.nationwise_capacity?.toLocaleString()} kW
+                                  </span>
+                                  {diff !== 0 && (
+                                    <span style={{ 
+                                      fontSize: '0.7rem', 
+                                      fontWeight: '700', 
+                                      color: diff > 0 ? '#10b981' : '#ef4444' 
+                                    }}>
+                                      {diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()} kW
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+            )}
 
           </div>
         )}
